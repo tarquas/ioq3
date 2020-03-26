@@ -1879,7 +1879,7 @@ const char indexScript[] = "createIndexFile() {(\n"
 "  for FILE in `ls *.urtdemo`; do\n"
 "    echo \" <a href=\\\""
 	"https://$BUCKET.storage.googleapis.com$DIR/$DEMO/$FILE"
-"\\\">$FILE</a>\" >> index.html || return 2\n"
+"\\\">$FILE</a><br>\" >> index.html || return 2\n"
 "  done\n"
 "  echo \"</body></html>\" >> index.html || return 2\n"
 ") 2> /dev/null > /dev/null\n }\ncreateIndexFile";
