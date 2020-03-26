@@ -221,5 +221,20 @@ exec server.cfg // Start server with the specified config file
 - [x] `sv_sayprefix` / `sv_tellprefix` cvars
 - [x] Send UrT specific server infostring
 - [x] Partial matching of map and players
+- [x] Upload demos to Google Cloud with `uploadserverdemo` command
 
 This list is likely incomplete. Please let me know if I forgot anything!
+
+# Set up Google Cloud Account for demos
+
+- Install [`gsutil`](https://cloud.google.com/storage/docs/gsutil_install);
+
+- On GCloud init step use console-only method: `gcloud init --console-only`;
+
+- Follow the instructions to link your Google Cloud account to `gsutil`;
+
+- Ensure correct installation and account setup: use `gsutil ls`
+  to list available buckets. Must show a list buckets in format `gs://<name>/`.
+
+- Test your server: Link `q3ut4` directory into this repo root.
+  Use `./test.sh` to build and launch your test server.
