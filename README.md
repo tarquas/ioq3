@@ -227,6 +227,8 @@ This list is likely incomplete. Please let me know if I forgot anything!
 
 # Set up Google Cloud Account for demos
 
+- Install `zip` (f.x. for Debian/Ubuntu: `apt-get install zip`);
+
 - Install [`gsutil`](https://cloud.google.com/storage/docs/gsutil_install);
 
 - On GCloud init step use console-only method: `gcloud init --console-only`;
