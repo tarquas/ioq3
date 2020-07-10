@@ -235,6 +235,11 @@ void CMod_LoadBrushes( lump_t *l ) {
 	cbrush_t	*out;
 	int			i, count;
 
+	int sidei;
+	cbrushside_t *side;
+
+	cvar_t *sv_iceEverywhere = Cvar_Get("sv_iceEverywhere", "0", 0);
+
 	in = (void *)(cmod_base + l->fileofs);
 	if (l->filelen % sizeof(*in)) {
 		Com_Error (ERR_DROP, "MOD_LoadBmodel: funny lump size");
@@ -254,7 +259,14 @@ void CMod_LoadBrushes( lump_t *l ) {
 		if ( out->shaderNum < 0 || out->shaderNum >= cm.numShaders ) {
 			Com_Error( ERR_DROP, "CMod_LoadBrushes: bad shaderNum: %i", out->shaderNum );
 		}
+
 		out->contents = cm.shaders[out->shaderNum].contentFlags;
+
+		if (sv_iceEverywhere->integer) {
+			for (sidei = 0, side = out->sides; sidei < out->numsides; sidei++, side++) {
+				side->surfaceFlags |= SURF_SLICK;
+			}
+		}
 
 		CM_BoundBrush( out );
 	}

@@ -31,6 +31,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	PERS_SCORE				0		// !!! MUST NOT CHANGE, SERVER AND
 										// GAME BOTH REFERENCE !!!
 
+#define	STAT_STAMINA	0
+#define	STAT_HEALTH		6
+
+
 #define	MAX_ENT_CLUSTERS	16
 
 #ifdef USE_VOIP
@@ -353,6 +357,11 @@ extern  cvar_t  *sv_demofolder;
 extern  cvar_t  *sv_autoRecordDemo;
 extern  cvar_t  *sv_sayprefix;
 extern  cvar_t  *sv_tellprefix;
+extern  cvar_t  *sv_forceGear;
+extern  cvar_t  *sv_iceEverywhere;
+extern  cvar_t  *sv_infiniteStamina;
+extern  cvar_t  *sv_infiniteAmmo;
+extern  cvar_t  *sv_substitute;
 
 #ifdef USE_AUTH
 extern	cvar_t	*sv_authServerIP;

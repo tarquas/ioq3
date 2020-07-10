@@ -1873,7 +1873,7 @@ int run_cmd(char *cmd)
 const char indexScript[] = "createIndexFile() {(\n"
 "  DEMOS=\"$1\"\n DEMO=\"$2\"\n BUCKET=\"$3\"\n DIR=\"$4\"\n"
 "  cd \"$DEMOS\" || return 1\n"
-"  zip -r9 $DEMO.zip *.urtdemo || return 3\n"
+"  zip -r9 \"$DEMO.zip\" *.urtdemo || return 3\n"
 "  echo \"<!doctype html><html><head><title>$DEMO"
 	"</title></head><body>\" > index.html || return 2\n"
 "  echo \"<h1>UrT Pickup Demos</h1><h2>$DEMO</h2>\" >> index.html || return 2\n"
@@ -1948,7 +1948,7 @@ static void SV_UploadServerDemo_f(void) {
 
 	int status;
 
-	Com_sprintf(shellcmd, MAX_OSPATH, "%s %s %s %s %s",
+	Com_sprintf(shellcmd, MAX_OSPATH, "%s \"%s\" \"%s\" \"%s\" \"%s\"",
 		indexScript, demoDir, demoId, bucket, dir);
 
 	if ((status = run_cmd(shellcmd))) {
@@ -1958,7 +1958,7 @@ static void SV_UploadServerDemo_f(void) {
 	}
 
 	Com_sprintf(shellcmd, MAX_OSPATH,
-		"gsutil cp -r %s gs://%s%s/%s 2> /dev/null > /dev/null",
+		"gsutil cp -r \"%s\" \"gs://%s%s/%s\" 2> /dev/null > /dev/null",
 		demoDir, bucket, dir, demoId
 	);
 
@@ -1975,7 +1975,7 @@ static void SV_UploadServerDemo_f(void) {
 	);
 
 	Com_sprintf(shellcmd, MAX_OSPATH,
-		"rm -rf %s/* 2> /dev/null > /dev/null",
+		"rm -rf \"%s/\"* 2> /dev/null > /dev/null",
 		demoDir
 	);
 

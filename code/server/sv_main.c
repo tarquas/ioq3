@@ -70,6 +70,12 @@ cvar_t	*sv_autoRecordDemo;
 cvar_t  *sv_tellprefix;
 cvar_t  *sv_sayprefix;
 
+cvar_t  *sv_forceGear;
+cvar_t  *sv_iceEverywhere;
+cvar_t  *sv_infiniteStamina;
+cvar_t  *sv_infiniteAmmo;
+cvar_t  *sv_substitute;
+
 #ifdef USE_AUTH
 cvar_t	*sv_authServerIP;
 cvar_t	*sv_auth_engine;

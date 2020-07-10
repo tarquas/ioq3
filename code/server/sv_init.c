@@ -926,6 +926,12 @@ void SV_Init (void)
 	sv_demofolder = Cvar_Get ("sv_demofolder", "serverdemos", CVAR_ARCHIVE );
 	sv_autoRecordDemo = Cvar_Get ("sv_autoRecordDemo", "0", CVAR_ARCHIVE );
 
+	sv_forceGear = Cvar_Get ("sv_forceGear", "", CVAR_ARCHIVE);
+	sv_iceEverywhere = Cvar_Get ("sv_iceEverywhere", "0", CVAR_ARCHIVE);
+	sv_infiniteStamina = Cvar_Get ("sv_infiniteStamina", "0", CVAR_ARCHIVE);
+	sv_infiniteAmmo = Cvar_Get ("sv_demonotice", "0", CVAR_ARCHIVE);
+	sv_substitute = Cvar_Get ("sv_substitute", "1", CVAR_ARCHIVE);
+
 	sv_sayprefix = Cvar_Get ("sv_sayprefix", "console: ", CVAR_ARCHIVE );
 	sv_tellprefix = Cvar_Get ("sv_tellprefix", "console_tell: ", CVAR_ARCHIVE );
 	sv_extraPaks = Cvar_Get ("sv_extraPaks", "", CVAR_ARCHIVE | CVAR_LATCH);

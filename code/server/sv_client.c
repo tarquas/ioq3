@@ -1228,6 +1228,8 @@ void SV_ExecuteClientCommand( client_t *cl, const char *s, qboolean clientOK ) {
 	
 	Cmd_TokenizeString( s );
 
+	if (!sv_substitute->integer && !strcasecmp(Cmd_Argv(0), "sub")) return;
+
 	// see if it is a server level command
 	for (u=ucmds ; u->name ; u++) {
 		if (!strcmp (Cmd_Argv(0), u->name) ) {
@@ -1370,11 +1372,15 @@ Also called by bot code
 ==================
 */
 void SV_ClientThink (client_t *cl, usercmd_t *cmd) {
+	playerState_t *ps;
+
 	cl->lastUsercmd = *cmd;
 
 	if ( cl->state != CS_ACTIVE ) {
 		return;		// may have been kicked during the last usercmd
 	}
+
+	ps = SV_GameClientNum((int) (cl - svs.clients));
 
 #ifdef USE_SKEETMOD
 	SV_SkeetBackupPowerups(cl);
@@ -1386,6 +1392,10 @@ void SV_ClientThink (client_t *cl, usercmd_t *cmd) {
 	SV_SkeetClientEvents(cl);
 #endif
 
+	if (sv_infiniteStamina->integer) {
+		// restore stamina according to the player health
+		ps->stats[STAT_STAMINA] = ps->stats[STAT_HEALTH] * 300;
+	}
 }
 
 /*
