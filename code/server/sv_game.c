@@ -75,6 +75,23 @@ Sends a command string to a client
 ===============
 */
 void SV_GameSendServerCommand( int clientNum, const char *text ) {
+	char s[MAX_MSGLEN];
+	int n, r, b, c;
+
+	if (!memcmp(text, "scoresg ", 8)) {
+		sscanf(text + 8, "%d %d", &r, &b);
+		r += sv.redDelta; sv.redScore = r;
+		b += sv.blueDelta; sv.blueScore = b;
+		snprintf(s, MAX_MSGLEN, "scoresg %d %d", r, b);
+		text = s;
+	} else if (!memcmp(text, "scores ", 7)) {
+		sscanf(text + 7, "%d %d %d%n", &n, &r, &b, &c);
+		r += sv.redDelta; sv.redScore = r;
+		b += sv.blueDelta; sv.blueScore = b;
+		snprintf(s, MAX_MSGLEN, "scores %d %d %d%s", n, r, b, text + 7 + c);
+		text = s;
+	}
+
 	if ( clientNum == -1 ) {
 		SV_SendServerCommand( NULL, "%s", text );
 	} else {
@@ -276,7 +293,7 @@ void SV_LocateGameData( sharedEntity_t *gEnts, int numGEntities, int sizeofGEnti
 	sv.num_entities = numGEntities;
 
 	sv.gameClients = clients;
-	sv.gameClientSize = sizeofGameClient;
+	sv.gameClientSize = sizeofGameClient; // 6336 vs sizeof(playerState_t)=468
 }
 
 

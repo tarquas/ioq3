@@ -45,7 +45,7 @@ SV_GetPlayerByHandle
 Returns the player with player id or name from Cmd_Argv(1)
 ==================
 */
-static client_t *SV_GetPlayerByHandle(void) {
+static client_t *SV_GetPlayerByHandleId(int arg) {
 
 	char      *s;
 	char      name[MAX_NAME_LENGTH];
@@ -59,12 +59,12 @@ static client_t *SV_GetPlayerByHandle(void) {
 		return NULL;
 	}
 
-	if (Cmd_Argc() < 2) {
+	if (Cmd_Argc() < arg + 1) {
 		Com_Printf("No player specified.\n");
 		return NULL;
 	}
 
-	s = Cmd_Argv(1);
+	s = Cmd_Argv(arg);
 
 	// Check whether this is a numeric player handle.
 	for (i = 0; s[i] >= '0' && s[i] <= '9'; i++);
@@ -134,6 +134,10 @@ static client_t *SV_GetPlayerByHandle(void) {
 
 	}
 
+}
+
+static client_t *SV_GetPlayerByHandle(void) {
+	return SV_GetPlayerByHandleId(1);
 }
 
 /*
@@ -1987,6 +1991,75 @@ static void SV_UploadServerDemo_f(void) {
 
 /*
 ==================
+SV_TeamScores_f
+
+Get/Set team scores
+==================
+*/
+static void SV_TeamScores_f(void) {
+	int r, b;
+
+	if (Cmd_Argc() < 3) {
+		r = sv.redScore;
+		b = sv.blueScore;
+		Com_Printf(" R:%d B:%d +R:%d +B:%d\n", r, b, sv.redDelta, sv.blueDelta);
+		return;
+	}
+
+	r = atoi(Cmd_Argv(1));
+	b = atoi(Cmd_Argv(2));
+
+	sv.redDelta += r - sv.redScore;
+	sv.blueDelta += b - sv.blueScore;
+	sv.redScore = r;
+	sv.blueScore = b;
+
+	SV_SendServerCommand(NULL, "scoresg %d %d", r, b);
+	Com_Printf("team scores set: R:%d B:%d +R:%d +B:%d\n", r, b, sv.redDelta, sv.blueDelta);
+}
+
+
+/*
+==================
+SV_PlayerScores_f
+
+Get/Set team scores
+==================
+*/
+static void SV_PlayerScores_f(void) {
+	client_t *cl;
+	playerState_t *ps;
+	int id, k, d;
+
+	if (Cmd_Argc() < 2) {
+		Com_Printf("usage: playerscores <player> [<K> <D>]\n");
+		return;
+	}
+
+	cl = SV_GetPlayerByHandle();
+	if (!cl) return;
+	id = cl - svs.clients;
+	ps = SV_GameClientNum(id);
+
+	if (Cmd_Argc() < 4) {
+		k = ps->persistant[PERS_SCORE];
+		d = ps->persistant[PERS_KILLED];
+		Com_Printf(" ID: %d K:%d D:%d\n", id, k, d);
+		return;
+	}
+
+	k = atoi(Cmd_Argv(2));
+	d = atoi(Cmd_Argv(3));
+
+	ps->persistant[PERS_SCORE] = k;
+	ps->persistant[PERS_KILLED] = d;
+
+	SV_SendScoreboardSingleMessageToAllClients(cl, ps);
+	Com_Printf("player scores set: ID: %d K:%d D:%d\n", id, k, d);
+}
+
+/*
+==================
 SV_CompleteMapName
 ==================
 */
@@ -2087,6 +2160,8 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand("bandel", SV_BanDel_f);
 	Cmd_AddCommand("exceptdel", SV_ExceptDel_f);
 	Cmd_AddCommand("flushbans", SV_FlushBans_f);
+	Cmd_AddCommand("teamscores", SV_TeamScores_f);
+	Cmd_AddCommand("playerscores", SV_PlayerScores_f);
 }
 
 /*
@@ -2113,6 +2188,8 @@ void SV_RemoveOperatorCommands( void ) {
 	Cmd_RemoveCommand ("startserverdemo");
 	Cmd_RemoveCommand ("stopserverdemo");
 	Cmd_RemoveCommand ("uploadserverdemo");
+	Cmd_RemoveCommand ("teamscores");
+	Cmd_RemoveCommand ("playerscores");
 #endif
 }
 

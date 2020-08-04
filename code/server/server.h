@@ -31,6 +31,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	PERS_SCORE				0		// !!! MUST NOT CHANGE, SERVER AND
 										// GAME BOTH REFERENCE !!!
 
+#define PERS_KILLED				8
+
 #define	STAT_STAMINA	0
 #define	STAT_HEALTH		6
 
@@ -115,6 +117,11 @@ typedef struct {
 
 	int				restartTime;
 	int				time;
+
+	int	redDelta;
+	int	blueDelta;
+	int	redScore;
+	int	blueScore;
 } server_t;
 
 

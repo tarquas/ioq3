@@ -654,6 +654,11 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	// make sure we are not paused
 	Cvar_Set("cl_paused", "0");
 
+	sv.redDelta = 0;
+	sv.blueDelta = 0;
+	sv.redScore = 0;
+	sv.blueScore = 0;
+
 	// get a new checksum feed and restart the file system
 	sv.checksumFeed = ( ((unsigned int)rand() << 16) ^ (unsigned int)rand() ) ^ Com_Milliseconds();
 	FS_SetMapName(server);

@@ -237,6 +237,8 @@ void CMod_LoadBrushes( lump_t *l ) {
 
 	int sidei;
 	cbrushside_t *side;
+	vec3_t *norm;
+	float h;
 
 	cvar_t *sv_iceEverywhere = Cvar_Get("sv_iceEverywhere", "0", 0);
 
@@ -264,7 +266,12 @@ void CMod_LoadBrushes( lump_t *l ) {
 
 		if (sv_iceEverywhere->integer) {
 			for (sidei = 0, side = out->sides; sidei < out->numsides; sidei++, side++) {
-				side->surfaceFlags |= SURF_SLICK;
+				norm = side->plane->normal;
+				h = abs((*norm)[2]);
+
+				if ((*norm)[2] > 0 && h >= abs((*norm)[0]) && h >= abs((*norm)[1])) {  // top surfaces
+					side->surfaceFlags |= SURF_SLICK;
+				}
 			}
 		}
 
