@@ -517,6 +517,8 @@ void SV_FreeClient(client_t *client)
 	SV_Netchan_FreeQueue(client);
 }
 
+void SV_StopRecordOne(client_t *client);
+
 /*
 =====================
 SV_DropClient
@@ -530,6 +532,8 @@ void SV_DropClient( client_t *drop, const char *reason ) {
 	int		i;
 	challenge_t	*challenge;
 	const qboolean isBot = drop->netchan.remoteAddress.type == NA_BOT;
+
+	if (drop->demo_recording) SV_StopRecordOne(drop);
 
 	if ( drop->state == CS_ZOMBIE ) {
 		return;		// already dropped
@@ -610,6 +614,8 @@ void SV_Auth_DropClient(client_t *drop, const char *reason, const char *message)
 	int		i;
 	challenge_t	*challenge;
 	const qboolean isBot = drop->netchan.remoteAddress.type == NA_BOT;
+
+	if (drop->demo_recording) SV_StopRecordOne(drop);
 
 	if (drop->state == CS_ZOMBIE) {
 		return;		// already dropped
