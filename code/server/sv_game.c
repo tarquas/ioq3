@@ -318,6 +318,81 @@ static int	FloatAsInt( float f ) {
 	return fi.i;
 }
 
+static const unsigned int matchStartStages[] = {  // weapon masks
+	-1, // all - warmup
+	(1 << 1) + (1 << 16), // knife & bomb - round 1
+	(7 << 1) + (3 << 20) + (1 << 26) + (1 << 16), // knife & pistols & bomb - round 2
+	-1 // all - all next rounds
+};
+
+void SV_AdjustPlayerGear( client_t *cl ) {
+	int mode, i, w, p, period, m;
+	playerState_t *ps;
+
+	mode = sv_matchStart->integer;
+	if (!mode) return;
+
+	period = sv.gameRound;
+
+	if (period) {
+		period += (svs.time - sv.gameRoundTime) / (sv_matchStartSec->integer * 1000);
+
+		switch (mode) {
+			case 1: period++; break;
+			case 2: period |= 1; break;
+		}
+
+		if (period > 3) period = 3;
+	}
+
+	m = matchStartStages[period];
+	if (m == -1) return;
+
+	ps = SV_GameClientNum(cl - svs.clients);
+
+	p = ps->weapon;
+
+	for (i = 0; i < MAX_POWERUPS; i++) {
+		w = ps->powerups[i] & 0x1F;
+
+		if (!(m & (1 << w))) {  // remove if not allowed
+			if (ps->weapon == i) p = -1;
+			ps->powerups[i] = w = 0;
+		}
+	}
+
+	if (p < 0) {
+		for (i = 0; i < MAX_POWERUPS; i++) {  // switch to pistol or knife
+			w = ps->powerups[i] & 0x1F;
+
+			if (w != 16 && w > p) {
+				p = w;
+				ps->weapon = i;
+			}
+		}
+	}
+}
+
+void SV_QVM_AdjustPlayerGear(char *slotStr) {
+	int slot;
+	sscanf(slotStr, "%d", &slot);
+	client_t *cl = &svs.clients[slot];
+	SV_AdjustPlayerGear(cl);
+}
+
+char* SV_QVM_HookOutput(char *s) {
+	if (!memcmp(s, "ClientUserinfoChanged: ", 23)) {
+		SV_QVM_AdjustPlayerGear(s + 23);
+	} else if (!memcmp(s, "ClientSpawn: ", 13)) {
+		SV_QVM_AdjustPlayerGear(s + 13);
+	} else if (!memcmp(s, "InitRound: ", 11)) {
+		sv.gameRound++;
+		sv.gameRoundTime = svs.time;
+	}
+
+	return s;
+}
+
 /*
 ====================
 SV_GameSystemCalls
@@ -327,9 +402,12 @@ The module is making a system call
 */
 intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	switch( args[0] ) {
-	case G_PRINT:
-		Com_Printf( "%s", (const char*)VMA(1) );
-		return 0;
+
+	case G_PRINT: {
+		char *out = SV_QVM_HookOutput((char*) VMA(1));
+		if (out) Com_Printf( "%s", out );
+	} return 0;
+
 	case G_ERROR:
 		Com_Error( ERR_DROP, "%s", (const char*)VMA(1) );
 		return 0;
@@ -420,6 +498,19 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 
 	case G_SET_CONFIGSTRING:
 		SV_SetConfigstring( args[1], VMA(2) );
+
+		switch (args[1]) {
+			case CS_WARMUP: {
+				int time;
+				sscanf((const char *) VMA(2), "%d", &time);
+
+				if (time) {
+					sv.gameRound = 0;
+					sv.gameRoundTime = svs.time;
+				}
+			} break;
+		}
+
 		return 0;
 	case G_GET_CONFIGSTRING:
 		SV_GetConfigstring( args[1], VMA(2), args[3] );

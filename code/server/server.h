@@ -122,6 +122,8 @@ typedef struct {
 	int	blueDelta;
 	int	redScore;
 	int	blueScore;
+	int	gameRound;
+	int	gameRoundTime;
 } server_t;
 
 
@@ -369,6 +371,8 @@ extern  cvar_t  *sv_iceEverywhere;
 extern  cvar_t  *sv_infiniteStamina;
 extern  cvar_t  *sv_infiniteAmmo;
 extern  cvar_t  *sv_substitute;
+extern  cvar_t  *sv_matchStart;
+extern  cvar_t  *sv_matchStartSec;
 
 #ifdef USE_AUTH
 extern	cvar_t	*sv_authServerIP;
@@ -478,6 +482,8 @@ void SV_SpawnServer( char *server, qboolean killBots );
 void SV_GetChallenge(netadr_t from);
 
 void SV_DirectConnect( netadr_t from );
+
+void SV_AdjustPlayerGear( client_t *cl );
 
 void SV_ExecuteClientMessage( client_t *cl, msg_t *msg );
 void SV_UserinfoChanged( client_t *cl );

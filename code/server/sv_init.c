@@ -658,6 +658,8 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	sv.blueDelta = 0;
 	sv.redScore = 0;
 	sv.blueScore = 0;
+	sv.gameRound = 0;
+	sv.gameRoundTime = 0;
 
 	// get a new checksum feed and restart the file system
 	sv.checksumFeed = ( ((unsigned int)rand() << 16) ^ (unsigned int)rand() ) ^ Com_Milliseconds();
@@ -936,6 +938,8 @@ void SV_Init (void)
 	sv_infiniteStamina = Cvar_Get ("sv_infiniteStamina", "0", CVAR_ARCHIVE);
 	sv_infiniteAmmo = Cvar_Get ("sv_demonotice", "0", CVAR_ARCHIVE);
 	sv_substitute = Cvar_Get ("sv_substitute", "1", CVAR_ARCHIVE);
+	sv_matchStart = Cvar_Get ("sv_matchStart", "0", CVAR_ARCHIVE);
+	sv_matchStartSec = Cvar_Get ("sv_matchStartSec", "30", CVAR_ARCHIVE);
 
 	sv_sayprefix = Cvar_Get ("sv_sayprefix", "console: ", CVAR_ARCHIVE );
 	sv_tellprefix = Cvar_Get ("sv_tellprefix", "console_tell: ", CVAR_ARCHIVE );

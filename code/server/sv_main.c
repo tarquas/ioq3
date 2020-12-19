@@ -75,6 +75,8 @@ cvar_t  *sv_iceEverywhere;
 cvar_t  *sv_infiniteStamina;
 cvar_t  *sv_infiniteAmmo;
 cvar_t  *sv_substitute;
+cvar_t  *sv_matchStart;
+cvar_t  *sv_matchStartSec;
 
 #ifdef USE_AUTH
 cvar_t	*sv_authServerIP;
