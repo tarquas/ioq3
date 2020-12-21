@@ -124,6 +124,7 @@ typedef struct {
 	int	blueScore;
 	int	gameRound;
 	int	gameRoundTime;
+	int matchReady; // 1*match + 2*red_ready + 4*blue_ready
 } server_t;
 
 

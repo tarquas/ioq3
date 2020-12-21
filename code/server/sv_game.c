@@ -325,6 +325,15 @@ static const unsigned int matchStartStages[] = {  // weapon masks
 	-1 // all - all next rounds
 };
 
+static int matchStartAnnounced = -1;
+
+static const char *matchStartStageNames[] = {
+	"Warmup",
+	"Knife",
+	"Pistol",
+	"All Weapons"
+};
+
 void SV_AdjustPlayerGear( client_t *cl ) {
 	int mode, i, w, p, period, m;
 	playerState_t *ps;
@@ -332,20 +341,30 @@ void SV_AdjustPlayerGear( client_t *cl ) {
 	mode = sv_matchStart->integer;
 	if (!mode) return;
 
-	period = sv.gameRound;
+	if (sv.matchReady && sv.matchReady != 7) {
+		period = 0;
+	} else {
+		period = sv.gameRound;
 
-	if (period) {
-		period += (svs.time - sv.gameRoundTime) / (sv_matchStartSec->integer * 1000);
+		if (period) {
+			period += (svs.time - sv.gameRoundTime) / (sv_matchStartSec->integer * 1000);
 
-		switch (mode) {
-			case 1: period++; break;
-			case 2: period |= 1; break;
+			switch (mode) {
+				case 1: period++; break;
+				case 2: period |= 1; break;
+			}
+
+			if (period > 3) period = 3;
 		}
-
-		if (period > 3) period = 3;
 	}
 
 	m = matchStartStages[period];
+
+	if (period != matchStartAnnounced) {
+		matchStartAnnounced = period;
+		Com_Printf("MatchStart: %s\n", matchStartStageNames[period]);
+	}
+
 	if (m == -1) return;
 
 	ps = SV_GameClientNum(cl - svs.clients);
@@ -391,6 +410,27 @@ char* SV_QVM_HookOutput(char *s) {
 	}
 
 	return s;
+}
+
+int SV_QVM_SetConfigstring(int id, char *value) {
+	// Com_Printf("<!!!> %d = %s\n", id, value);
+	switch (id) {
+		case CS_WARMUP: {
+			int time;
+			sscanf(value, "%d", &time);
+
+			if (time) {
+				sv.gameRound = 0;
+				sv.gameRoundTime = svs.time;
+			}
+		} break;
+
+		case 1005: {
+			sscanf(value, "%d", &sv.matchReady);
+		} break;
+	}
+
+	return 1;
 }
 
 /*
@@ -497,33 +537,25 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return SV_inPVSIgnorePortals( VMA(1), VMA(2) );
 
 	case G_SET_CONFIGSTRING:
-		SV_SetConfigstring( args[1], VMA(2) );
-
-		switch (args[1]) {
-			case CS_WARMUP: {
-				int time;
-				sscanf((const char *) VMA(2), "%d", &time);
-
-				if (time) {
-					sv.gameRound = 0;
-					sv.gameRoundTime = svs.time;
-				}
-			} break;
+		if (SV_QVM_SetConfigstring( (int) args[1], (char *) VMA(2) )) {
+			SV_SetConfigstring( args[1], VMA(2) );
 		}
-
 		return 0;
 	case G_GET_CONFIGSTRING:
 		SV_GetConfigstring( args[1], VMA(2), args[3] );
 		return 0;
+
 	case G_SET_USERINFO:
 		SV_SetUserinfo( args[1], VMA(2) );
 		return 0;
 	case G_GET_USERINFO:
 		SV_GetUserinfo( args[1], VMA(2), args[3] );
 		return 0;
+
 	case G_GET_SERVERINFO:
 		SV_GetServerinfo( VMA(1), args[2] );
 		return 0;
+
 	case G_ADJUST_AREA_PORTAL_STATE:
 		SV_AdjustAreaPortalState( VMA(1), args[2] );
 		return 0;
