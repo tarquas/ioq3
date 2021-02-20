@@ -437,7 +437,9 @@ void Field_Paste( field_t *edit ) {
 	// send as if typed, so insert / overstrike works properly
 	pasteLen = strlen( cbd );
 	for ( i = 0 ; i < pasteLen ; i++ ) {
-		Field_CharEvent( edit, cbd[i] );
+		if (Q_isprint(cbd[i])) {
+			Field_CharEvent( edit, cbd[i] );
+		}
 	}
 
 	Z_Free( cbd );
@@ -670,7 +672,7 @@ void Console_Key (int key) {
 
 	// command history (ctrl-p ctrl-n for unix style)
 
-	if ( (key == K_MWHEELUP && keys[K_SHIFT].down) || ( key == K_UPARROW ) || ( key == K_KP_UPARROW ) ||
+	if ( (key == K_MWHEELUP && keys[K_SHIFT].down) || key == K_UPARROW ||
 		 ( ( tolower(key) == 'p' ) && keys[K_CTRL].down ) ) {
 		if ( nextHistoryLine - historyLine < COMMAND_HISTORY 
 			&& historyLine > 0 ) {
@@ -680,7 +682,7 @@ void Console_Key (int key) {
 		return;
 	}
 
-	if ( (key == K_MWHEELDOWN && keys[K_SHIFT].down) || ( key == K_DOWNARROW ) || ( key == K_KP_DOWNARROW ) ||
+	if ( (key == K_MWHEELDOWN && keys[K_SHIFT].down) || key == K_DOWNARROW ||
 		 ( ( tolower(key) == 'n' ) && keys[K_CTRL].down ) ) {
 		historyLine++;
 		if (historyLine >= nextHistoryLine) {
@@ -731,6 +733,18 @@ void Console_Key (int key) {
 	// ctrl-end = bottom of console
 	if ( key == K_END && keys[K_CTRL].down ) {
 		Con_Bottom();
+		return;
+	}
+
+	// shift-right, console tabs: next tab
+	if ((key == K_RIGHTARROW && keys[K_SHIFT].down) || (key == K_MOUSE2)) {
+		Con_NextTab();
+		return;
+	}
+
+	// shift-left, console tabs: previous tab
+	if ((key == K_LEFTARROW && keys[K_SHIFT].down) || (key == K_MOUSE1)) {
+		Con_PrevTab();
 		return;
 	}
 
@@ -1179,14 +1193,14 @@ void CL_ParseBinding( int key, qboolean down, unsigned time )
 	char buf[ MAX_STRING_CHARS ], *p = buf, *end;
 	qboolean allCommands, allowUpCmds;
 
-	if( clc.state == CA_DISCONNECTED && Key_GetCatcher( ) == 0 )
+	if( (clc.state == CA_DISCONNECTED || *clc.downloadName) && Key_GetCatcher( ) == 0 )
 		return;
 	if( !keys[key].binding || !keys[key].binding[0] )
 		return;
 	Q_strncpyz( buf, keys[key].binding, sizeof( buf ) );
 
 	// run all bind commands if console, ui, etc aren't reading keys
-	allCommands = ( Key_GetCatcher( ) == 0 );
+	allCommands = ( (Key_GetCatcher( ) & ~KEYCATCH_RADIO) == 0 );
 
 	// allow button up commands if in game even if key catcher is set
 	allowUpCmds = ( clc.state != CA_DISCONNECTED );
@@ -1226,6 +1240,32 @@ void CL_ParseBinding( int key, qboolean down, unsigned time )
 
 /*
 ===================
+CL_UIPaste
+
+Paste the clipboard contents as a series of UI_KEY_EVENT
+===================
+*/
+static void CL_UIPaste(void) {
+	char	*cbd;
+	int		i;
+
+	cbd = Sys_GetClipboardData();
+
+	if ( !cbd ) {
+		return;
+	}
+
+	// send as if typed, so insert / overstrike works properly
+	for ( i = 0 ; i < strlen(cbd) ; i++ ) {
+		if (Q_isprint(cbd[i])) {
+			VM_Call( uivm, UI_KEY_EVENT, cbd[i] | K_CHAR_FLAG, qtrue );
+		}
+	}
+	Z_Free( cbd );
+}
+
+/*
+===================
 CL_KeyDownEvent
 
 Called by CL_KeyEvent to handle a keypress
@@ -1258,6 +1298,14 @@ void CL_KeyDownEvent( int key, unsigned time )
 		return;
 	}
 
+#ifdef USE_CURL
+	// This is for the hacked download query, whether user trusts data from server
+	if (clc.dlquerying && !(Key_GetCatcher() & KEYCATCH_CONSOLE))
+	{
+		CL_DownloadMenu(key);
+		return;
+	}
+#endif
 
 	// keys can still be used for bound actions
 	if ( ( key < 128 || key == K_MOUSE1 ) &&
@@ -1284,6 +1332,12 @@ void CL_KeyDownEvent( int key, unsigned time )
 			return;
 		}
 
+		// escape closes radio menu
+		if (Key_GetCatcher( ) & KEYCATCH_RADIO) {
+			Key_SetCatcher (Key_GetCatcher( ) & ~KEYCATCH_RADIO);
+			return;
+		}
+
 		if ( !( Key_GetCatcher( ) & KEYCATCH_UI ) ) {
 			if ( clc.state == CA_ACTIVE && !clc.demoplaying ) {
 				VM_Call( uivm, UI_SET_ACTIVE_MENU, UIMENU_INGAME );
@@ -1300,6 +1354,14 @@ void CL_KeyDownEvent( int key, unsigned time )
 		return;
 	}
 
+	// don't parse bindings for 0..9 keys when radio menu is open
+	// those will be handled by the char event
+	if ((Key_GetCatcher( ) & KEYCATCH_RADIO) && !(Key_GetCatcher( ) & KEYCATCH_CONSOLE)) {
+		if (key >= '0' && key <= '9') {
+			return;
+		}
+	}
+
 	// send the bound action
 	CL_ParseBinding( key, qtrue, time );
 
@@ -1308,8 +1370,13 @@ void CL_KeyDownEvent( int key, unsigned time )
 		Console_Key( key );
 	} else if ( Key_GetCatcher( ) & KEYCATCH_UI ) {
 		if ( uivm ) {
-			VM_Call( uivm, UI_KEY_EVENT, key, qtrue );
-		} 
+			// shift-insert is paste
+			if ( ( ( key == K_INS ) || ( key == K_KP_INS ) ) && keys[K_SHIFT].down ) {
+				CL_UIPaste();
+			} else {
+				VM_Call( uivm, UI_KEY_EVENT, key, qtrue );
+			}
+		}
 	} else if ( Key_GetCatcher( ) & KEYCATCH_CGAME ) {
 		if ( cgvm ) {
 			VM_Call( cgvm, CG_KEY_EVENT, key, qtrue );
@@ -1392,7 +1459,11 @@ void CL_CharEvent( int key ) {
 	}
 	else if ( Key_GetCatcher( ) & KEYCATCH_UI )
 	{
-		VM_Call( uivm, UI_KEY_EVENT, key | K_CHAR_FLAG, qtrue );
+		if ( key == 'v' - 'a' + 1 ) { // ctrl-v is paste
+			CL_UIPaste();
+		} else {
+			VM_Call( uivm, UI_KEY_EVENT, key | K_CHAR_FLAG, qtrue );
+		}
 	}
 	else if ( Key_GetCatcher( ) & KEYCATCH_MESSAGE ) 
 	{
@@ -1444,7 +1515,9 @@ Key_SetCatcher
 */
 void Key_SetCatcher( int catcher ) {
 	// If the catcher state is changing, clear all key states
-	if( catcher != keyCatchers )
+	// unless only KEYCATCH_RADIO was toggled
+
+	if( (catcher & ~KEYCATCH_RADIO) != (keyCatchers & ~KEYCATCH_RADIO) )
 		Key_ClearStates( );
 
 	keyCatchers = catcher;

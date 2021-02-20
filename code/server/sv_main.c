@@ -36,7 +36,6 @@ cvar_t	*sv_timeout;			// seconds without any message
 cvar_t	*sv_zombietime;			// seconds to sink messages after disconnect
 cvar_t	*sv_rconPassword;		// password for remote server commands
 cvar_t	*sv_privatePassword;		// password for the privateClient slots
-cvar_t	*sv_allowDownload;
 cvar_t	*sv_maxclients;
 
 cvar_t	*sv_privateClients;		// number of clients reserved for password
@@ -51,20 +50,42 @@ cvar_t	*sv_mapChecksum;
 cvar_t	*sv_serverid;
 cvar_t	*sv_minRate;
 cvar_t	*sv_maxRate;
-cvar_t	*sv_dlRate;
 cvar_t	*sv_minPing;
 cvar_t	*sv_maxPing;
 cvar_t	*sv_gametype;
 cvar_t	*sv_pure;
+cvar_t	*sv_extraPure;
+cvar_t	*sv_extraPaks;
 cvar_t	*sv_floodProtect;
+cvar_t	*sv_newpurelist;
 cvar_t	*sv_lanForceRate; // dedicated 1 (LAN) server forces local client rates to 99999 (bug #491)
-#ifndef STANDALONE
-cvar_t	*sv_strictAuth;
-#endif
 cvar_t	*sv_banFile;
+cvar_t	*sv_clientsPerIp;
 
 serverBan_t serverBans[SERVER_MAXBANS];
 int serverBansCount = 0;
+cvar_t	*sv_demonotice;			// notice to print to a client being recorded server-side
+cvar_t	*sv_demofolder;			//@Barbatos - the name of the folder that contains server-side demos
+cvar_t	*sv_autoRecordDemo;
+cvar_t  *sv_tellprefix;
+cvar_t  *sv_sayprefix;
+
+#ifdef USE_AUTH
+cvar_t	*sv_authServerIP;
+cvar_t	*sv_auth_engine;
+#endif
+
+#ifdef USE_SKEETMOD
+cvar_t  *sv_skeetshoot;
+cvar_t  *sv_skeethitreport;
+cvar_t  *sv_skeethitsound;
+cvar_t  *sv_skeetpoints;
+cvar_t  *sv_skeetpointsnotify;
+cvar_t  *sv_skeetprotect;
+cvar_t  *sv_skeetspeed;
+cvar_t  *sv_skeetrotate;
+cvar_t  *sv_skeetfansize;
+#endif
 
 /*
 =============================================================================
@@ -259,6 +280,10 @@ void SV_MasterHeartbeat(const char *message)
 
 	svs.nextHeartbeatTime = svs.time + HEARTBEAT_MSEC;
 
+#ifdef USE_AUTH
+	VM_Call( gvm, GAME_AUTHSERVER_HEARTBEAT );
+#endif
+
 	// send to group masters
 	for (i = 0; i < MAX_MASTER_SERVERS; i++)
 	{
@@ -343,6 +368,11 @@ void SV_MasterShutdown( void ) {
 
 	// when the master tries to poll the server, it won't respond, so
 	// it will be removed from the list
+
+#ifdef USE_AUTH
+	VM_Call( gvm, GAME_AUTHSERVER_SHUTDOWN );
+#endif
+
 }
 
 
@@ -654,12 +684,19 @@ void SVC_Info( netadr_t from ) {
 	Info_SetValueForKey( infostring, "hostname", sv_hostname->string );
 	Info_SetValueForKey( infostring, "mapname", sv_mapname->string );
 	Info_SetValueForKey( infostring, "clients", va("%i", count) );
-	Info_SetValueForKey(infostring, "g_humanplayers", va("%i", humans));
+	Info_SetValueForKey( infostring, "bots", va("%i", count - humans));
 	Info_SetValueForKey( infostring, "sv_maxclients", 
 		va("%i", sv_maxclients->integer - sv_privateClients->integer ) );
 	Info_SetValueForKey( infostring, "gametype", va("%i", sv_gametype->integer ) );
 	Info_SetValueForKey( infostring, "pure", va("%i", sv_pure->integer ) );
-	Info_SetValueForKey(infostring, "g_needpass", va("%d", Cvar_VariableIntegerValue("g_needpass")));
+
+	// UrT checks for "password" instead of "g_needpass"
+	if (Cvar_VariableValue("g_needpass") == 1)
+		Info_SetValueForKey(infostring, "password", "1");
+
+#ifdef USE_AUTH
+	Info_SetValueForKey( infostring, "auth", Cvar_VariableString("auth") );
+#endif
 
 #ifdef USE_VOIP
 	if (sv_voipProtocol->string && *sv_voipProtocol->string) {
@@ -677,6 +714,8 @@ void SVC_Info( netadr_t from ) {
 	if( *gamedir ) {
 		Info_SetValueForKey( infostring, "game", gamedir );
 	}
+
+	Info_SetValueForKey(infostring, "modversion", Cvar_VariableString("g_modversion"));
 
 	NET_OutOfBandPrint( NS_SERVER, from, "infoResponse\n%s", infostring );
 }
@@ -727,10 +766,10 @@ static void SVC_RemoteCommand( netadr_t from, msg_t *msg ) {
 		}
 
 		valid = qfalse;
-		Com_Printf ("Bad rcon from %s: %s\n", NET_AdrToString (from), Cmd_ArgsFrom(2) );
+		Com_Printf ("Bad rcon from %s: %s\n", NET_AdrToStringwPort (from), Cmd_ArgsFrom(2) );
 	} else {
 		valid = qtrue;
-		Com_Printf ("Rcon from %s: %s\n", NET_AdrToString (from), Cmd_ArgsFrom(2) );
+		Com_Printf ("Rcon from %s: %s\n", NET_AdrToStringwPort (from), Cmd_ArgsFrom(2) );
 	}
 
 	// start redirecting all print outputs to the packet
@@ -758,7 +797,11 @@ static void SVC_RemoteCommand( netadr_t from, msg_t *msg ) {
 			cmd_aux++;
 		
 		Q_strcat( remaining, sizeof(remaining), cmd_aux);
-		
+
+#ifdef USE_SKEETMOD
+		SV_SkeetParseGameRconCommand(remaining);
+#endif
+
 		Cmd_ExecuteString (remaining);
 
 	}
@@ -779,6 +822,9 @@ connectionless packets.
 static void SV_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
 	char	*s;
 	char	*c;
+#ifdef USE_AUTH
+	netadr_t	authServerIP;
+#endif
 
 	MSG_BeginReadingOOB( msg );
 	MSG_ReadLong( msg );		// skip the -1 marker
@@ -791,7 +837,7 @@ static void SV_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
 	Cmd_TokenizeString( s );
 
 	c = Cmd_Argv(0);
-	Com_DPrintf ("SV packet %s : %s\n", NET_AdrToString(from), c);
+	Com_DPrintf ("SV packet %s : %s\n", NET_AdrToStringwPort(from), c);
 
 	if (!Q_stricmp(c, "getstatus")) {
 		SVC_Status( from );
@@ -801,9 +847,14 @@ static void SV_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
 		SV_GetChallenge(from);
 	} else if (!Q_stricmp(c, "connect")) {
 		SV_DirectConnect( from );
-#ifndef STANDALONE
-	} else if (!Q_stricmp(c, "ipAuthorize")) {
-		SV_AuthorizeIpPacket( from );
+#ifdef USE_AUTH
+	} else if ((!Q_stricmp(c, "AUTH:SV"))) {
+		NET_StringToAdr(sv_authServerIP->string, &authServerIP, NA_IP);
+		if (!NET_CompareBaseAdr(from, authServerIP)) {
+			Com_Printf("AUTH not from the Auth Server!\n");
+			return;
+		}
+		VM_Call(gvm, GAME_AUTHSERVER_PACKET);
 #endif
 	} else if (!Q_stricmp(c, "rcon")) {
 		SVC_RemoteCommand( from, msg );
@@ -813,7 +864,7 @@ static void SV_ConnectionlessPacket( netadr_t from, msg_t *msg ) {
 		// sequenced messages to the old client
 	} else {
 		Com_DPrintf ("bad connectionless packet from %s:\n%s\n",
-			NET_AdrToString (from), s);
+			NET_AdrToStringwPort (from), s);
 	}
 }
 
@@ -1150,11 +1201,20 @@ void SV_Frame( int msec ) {
 	// check timeouts
 	SV_CheckTimeouts();
 
+	// check user info buffer thingy
+	SV_CheckClientUserinfoTimer();
+
 	// send messages back to the clients
 	SV_SendClientMessages();
 
 	// send a heartbeat to the master if needed
 	SV_MasterHeartbeat(HEARTBEAT_FOR_MASTER);
+
+#ifdef USE_SKEETMOD
+	// advance skeets
+	SV_SkeetThink();
+#endif
+
 }
 
 /*
@@ -1211,7 +1271,7 @@ int SV_RateMsec(client_t *client)
 ====================
 SV_SendQueuedPackets
 
-Send download messages and queued packets in the time that we're idle, i.e.
+Send queued packets in the time that we're idle, i.e.
 not computing a server frame or sending client snapshots.
 Return the time in msec until we expect to be called next
 ====================
@@ -1219,70 +1279,14 @@ Return the time in msec until we expect to be called next
 
 int SV_SendQueuedPackets()
 {
-	int numBlocks;
-	int dlStart, deltaT, delayT;
-	static int dlNextRound = 0;
+	int delayT;
 	int timeVal = INT_MAX;
 
 	// Send out fragmented packets now that we're idle
 	delayT = SV_SendQueuedMessages();
+
 	if(delayT >= 0)
 		timeVal = delayT;
-
-	if(sv_dlRate->integer)
-	{
-		// Rate limiting. This is very imprecise for high
-		// download rates due to millisecond timedelta resolution
-		dlStart = Sys_Milliseconds();
-		deltaT = dlNextRound - dlStart;
-
-		if(deltaT > 0)
-		{
-			if(deltaT < timeVal)
-				timeVal = deltaT + 1;
-		}
-		else
-		{
-			numBlocks = SV_SendDownloadMessages();
-
-			if(numBlocks)
-			{
-				// There are active downloads
-				deltaT = Sys_Milliseconds() - dlStart;
-
-				delayT = 1000 * numBlocks * MAX_DOWNLOAD_BLKSIZE;
-				delayT /= sv_dlRate->integer * 1024;
-
-				if(delayT <= deltaT + 1)
-				{
-					// Sending the last round of download messages
-					// took too long for given rate, don't wait for
-					// next round, but always enforce a 1ms delay
-					// between DL message rounds so we don't hog
-					// all of the bandwidth. This will result in an
-					// effective maximum rate of 1MB/s per user, but the
-					// low download window size limits this anyways.
-					if(timeVal > 2)
-						timeVal = 2;
-
-					dlNextRound = dlStart + deltaT + 1;
-				}
-				else
-				{
-					dlNextRound = dlStart + delayT;
-					delayT -= deltaT;
-
-					if(delayT < timeVal)
-						timeVal = delayT;
-				}
-			}
-		}
-	}
-	else
-	{
-		if(SV_SendDownloadMessages())
-			timeVal = 0;
-	}
 
 	return timeVal;
 }

@@ -137,7 +137,8 @@ NET
 
 #define	PORT_ANY			-1
 
-#define	MAX_RELIABLE_COMMANDS	64			// max string commands buffered for restransmit
+//@Barbatos: increased it to avoid the loading map issue on servers with large amount of players (previously 64)
+#define	MAX_RELIABLE_COMMANDS	128			// max string commands buffered for restransmit
 
 typedef enum {
 	NA_BAD = 0,					// an address lookup failed
@@ -255,28 +256,28 @@ PROTOCOL
 #define PROTOCOL_LEGACY_VERSION	68
 // 1.31 - 67
 
+#ifdef USE_DEMO_FORMAT_42
+#	define	DEMO_VERSION	70
+#else
+#	define	DEMO_VERSION	68
+#endif
+
 // maintain a list of compatible protocols for demo playing
 // NOTE: that stuff only works with two digits protocols
 extern int demo_protocols[];
 
-#if !defined UPDATE_SERVER_NAME && !defined STANDALONE
-#define	UPDATE_SERVER_NAME	"update.quake3arena.com"
-#endif
 // override on command line, config files etc.
 #ifndef MASTER_SERVER_NAME
-#define MASTER_SERVER_NAME	"master.quake3arena.com"
+#define MASTER_SERVER_NAME	"master.urbanterror.info"
+#endif
+#ifndef MASTER2_SERVER_NAME
+#define MASTER2_SERVER_NAME	"master2.urbanterror.info"
+#endif
+#ifndef MASTER3_SERVER_NAME
+#define MASTER3_SERVER_NAME	"master3.urbanterror.info"
 #endif
 
-#ifndef STANDALONE
-  #ifndef AUTHORIZE_SERVER_NAME
-    #define	AUTHORIZE_SERVER_NAME	"authorize.quake3arena.com"
-  #endif
-  #ifndef PORT_AUTHORIZE
-  #define	PORT_AUTHORIZE		27952
-  #endif
-#endif
-
-#define	PORT_MASTER			27950
+#define	PORT_MASTER			27900
 #define	PORT_UPDATE			27951
 #define	PORT_SERVER			27960
 #define	NUM_SERVER_PORTS	4		// broadcast scan this many ports after
@@ -597,12 +598,18 @@ issues.
 #define NUM_ID_PAKS		9
 #define NUM_TA_PAKS		4
 
-#define	MAX_FILE_HANDLES	64
+#define MAX_FILE_HANDLES	64
+#define MAX_ZPATH		256
+#define MAX_SEARCH_PATHS	4096
 
 #ifdef DEDICATED
 #	define Q3CONFIG_CFG "q3config_server.cfg"
 #else
 #	define Q3CONFIG_CFG "q3config.cfg"
+#endif
+
+#ifndef COMMAND_FILE_NAME
+#define COMMAND_FILE_NAME "cmdline.txt"
 #endif
 
 qboolean FS_Initialized( void );
@@ -707,6 +714,10 @@ const char *FS_LoadedPakChecksums( void );
 const char *FS_LoadedPakPureChecksums( void );
 // Returns a space separated string containing the checksums of all loaded pk3 files.
 // Servers with sv_pure set will get this string and pass it to clients.
+int FS_LoadedPakChecksumsBlob( unsigned char *dst, int dstlen );
+
+void FS_SetMapName( const char *mapname );
+void FS_SetExtraPure( const char *mapname, const char *extrapaks );
 
 const char *FS_ReferencedPakNames( void );
 const char *FS_ReferencedPakChecksums( void );
@@ -727,7 +738,7 @@ void FS_PureServerSetLoadedPaks( const char *pakSums, const char *pakNames );
 
 qboolean FS_CheckDirTraversal(const char *checkdir);
 qboolean FS_InvalidGameDir(const char *gamedir);
-qboolean FS_idPak(char *pak, char *base, int numPaks);
+qboolean FS_GamePak(char *pak);
 qboolean FS_ComparePaks( char *neededpaks, int len, qboolean dlstring );
 
 void FS_Rename( const char *from, const char *to );
@@ -736,10 +747,13 @@ void FS_Remove( const char *osPath );
 void FS_HomeRemove( const char *homePath );
 
 void	FS_FilenameCompletion( const char *dir, const char *ext,
-		qboolean stripExt, void(*callback)(const char *s), qboolean allowNonPureFilesOnDisk );
+		qboolean stripExt, void(*callback)(const char *s), qboolean searchUnpureDirs, qboolean searchUnpurePaks );
 
 const char *FS_GetCurrentGameDir(void);
 qboolean FS_Which(const char *filename, void *searchPath);
+
+extern int	fs_dangerousPaksFound;
+extern char	fs_dangerousPakNames[MAX_ZPATH][MAX_SEARCH_PATHS];
 
 /*
 ==============================================================
@@ -761,7 +775,7 @@ void Field_Clear( field_t *edit );
 void Field_AutoComplete( field_t *edit );
 void Field_CompleteKeyname( void );
 void Field_CompleteFilename( const char *dir,
-		const char *ext, qboolean stripExt, qboolean allowNonPureFilesOnDisk );
+		const char *ext, qboolean stripExt, qboolean searchUnpureDirs, qboolean searchUnpurePaks );
 void Field_CompleteCommand( char *cmd,
 		qboolean doCommands, qboolean doCvars );
 void Field_CompletePlayerName( const char **names, int count );
@@ -773,10 +787,6 @@ MISC
 
 ==============================================================
 */
-
-// centralizing the declarations for cl_cdkey
-// https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=470
-extern char cl_cdkey[34];
 
 // returned by Sys_GetProcessorFeatures
 typedef enum
@@ -866,9 +876,9 @@ extern	cvar_t	*com_maxfpsUnfocused;
 extern	cvar_t	*com_minimized;
 extern	cvar_t	*com_maxfpsMinimized;
 extern	cvar_t	*com_altivec;
-extern	cvar_t	*com_standalone;
 extern	cvar_t	*com_basegame;
 extern	cvar_t	*com_homepath;
+extern	cvar_t	*com_logfileName;
 
 // both client and server must agree to pause
 extern	cvar_t	*cl_paused;
@@ -997,6 +1007,7 @@ void CL_JoystickEvent( int axis, int value, int time );
 
 void CL_PacketEvent( netadr_t from, msg_t *msg );
 
+void CL_DevConsolePrint( char *text );
 void CL_ConsolePrint( char *text );
 
 void CL_MapLoading( void );
@@ -1057,7 +1068,14 @@ int SV_SendQueuedPackets(void);
 // UI interface
 //
 qboolean UI_GameCommand( void );
-qboolean UI_usesUniqueCDKey(void);
+
+//
+// input interface
+//
+void IN_Init( void *windowData );
+void IN_Frame( void );
+void IN_Shutdown( void );
+void IN_Restart( void );
 
 //
 // input interface
@@ -1123,6 +1141,7 @@ void	Sys_SetDefaultInstallPath(const char *path);
 char	*Sys_DefaultInstallPath(void);
 char	*Sys_SteamPath(void);
 char	*Sys_GogPath(void);
+char	*Sys_BinaryPath(void);
 
 #ifdef __APPLE__
 char    *Sys_DefaultAppPath(void);
@@ -1223,10 +1242,16 @@ extern huffman_t clientHuffTables;
 #define	CL_ENCODE_START		12
 #define CL_DECODE_START		4
 
-// flags for sv_allowDownload and cl_allowDownload
+// flags for sv_allowDownload and cl_autodownload
 #define DLF_ENABLE 1
 #define DLF_NO_REDIRECT 2
 #define DLF_NO_UDP 4
 #define DLF_NO_DISCONNECT 8
+
+// compressed pure list buffer
+#define PURE_COMPRESS_BUFFER 16384
+
+// last N CS will be used:
+#define PURE_COMPRESS_NUMCS 8
 
 #endif // _QCOMMON_H_

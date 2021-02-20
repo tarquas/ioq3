@@ -31,6 +31,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "snd_local.h"
 #include "snd_codec.h"
+#include "snd_dmahd.h"
 #include "client.h"
 
 void S_Update_( void );
@@ -55,14 +56,14 @@ channel_t   s_channels[MAX_CHANNELS];
 channel_t   loop_channels[MAX_CHANNELS];
 int			numLoopChannels;
 
-static int	s_soundStarted;
-static		qboolean	s_soundMuted;
+int			s_soundStarted;
+qboolean	s_soundMuted;
 
 dma_t		dma;
 
-static int			listener_number;
-static vec3_t		listener_origin;
-static vec3_t		listener_axis[3];
+int			listener_number;
+vec3_t		listener_origin;
+vec3_t		listener_axis[3];
 
 int			s_soundtime;		// sample PAIRS
 int   		s_paintedtime; 		// sample PAIRS
@@ -81,7 +82,7 @@ cvar_t		*s_show;
 cvar_t		*s_mixahead;
 cvar_t		*s_mixPreStep;
 
-static loopSound_t		loopSounds[MAX_GENTITIES];
+loopSound_t	loopSounds[MAX_GENTITIES];
 static	channel_t		*freelist = NULL;
 
 int						s_rawend[MAX_RAW_STREAMS];
@@ -399,7 +400,7 @@ void S_Base_BeginRegistration( void ) {
 		Com_Memset(s_knownSfx, '\0', sizeof(s_knownSfx));
 		Com_Memset(sfxHash, '\0', sizeof(sfx_t *) * LOOP_HASH);
 
-		S_Base_RegisterSound("sound/feedback/hit.wav", qfalse);		// changed to a sound in baseq3
+		S_Base_RegisterSound("sound/null.wav", qfalse);			// changed to a sound in baseq3
 	}
 }
 
@@ -559,9 +560,9 @@ static void S_Base_StartSoundEx( vec3_t origin, int entityNum, int entchannel, s
 //	Com_Printf("playing %s\n", sfx->soundName);
 	// pick a channel to play on
 
-	allowed = 4;
+	allowed = 16;
 	if (entityNum == listener_number) {
-		allowed = 8;
+		allowed = 32;
 	}
 
 	fullVolume = qfalse;
@@ -573,17 +574,16 @@ static void S_Base_StartSoundEx( vec3_t origin, int entityNum, int entchannel, s
 	inplay = 0;
 	for ( i = 0; i < MAX_CHANNELS ; i++, ch++ ) {		
 		if (ch->entnum == entityNum && ch->thesfx == sfx) {
-			if (time - ch->allocTime < 50) {
-//				if (Cvar_VariableValue( "cg_showmiss" )) {
-//					Com_Printf("double sound start\n");
-//				}
+			if (time - ch->allocTime < 30) {
+				Com_DPrintf(S_COLOR_YELLOW "S_StartSound: Double start (%d ms < 30 ms) for %s\n", time - ch->allocTime, sfx->soundName);
 				return;
 			}
 			inplay++;
 		}
 	}
 
-	if (inplay>allowed) {
+	if (inplay > allowed) {
+		Com_DPrintf(S_COLOR_YELLOW "S_StartSound: %s hit the concurrent channels limit (%d)\n", sfx->soundName, allowed);
 		return;
 	}
 
@@ -620,13 +620,14 @@ static void S_Base_StartSoundEx( vec3_t origin, int entityNum, int entchannel, s
 					}
 				}
 				if (chosen == -1) {
-					Com_Printf("dropping sound\n");
+					Com_DPrintf(S_COLOR_YELLOW "S_StartSound: No more channels free for %s\n", sfx->soundName);
 					return;
 				}
 			}
 		}
 		ch = &s_channels[chosen];
 		ch->allocTime = sfx->lastTimeUsed;
+		Com_DPrintf(S_COLOR_YELLOW "S_StartSound: No more channels free for %s, dropping earliest sound: %s\n", sfx->soundName, ch->thesfx->soundName);
 	}
 
 	if (origin) {
@@ -1453,7 +1454,7 @@ void S_UpdateBackgroundTrack( void ) {
 		bufferSamples = MAX_RAW_SAMPLES - (s_rawend[0] - s_soundtime);
 
 		// decide how much data needs to be read from the file
-		fileSamples = bufferSamples * s_backgroundStream->info.rate / dma.speed;
+		fileSamples = (bufferSamples * dma.speed) / s_backgroundStream->info.rate;
 
 		if (!fileSamples)
 			return;
@@ -1613,6 +1614,11 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 	si->Capture = S_Base_Capture;
 	si->StopCapture = S_Base_StopCapture;
 	si->MasterGain = S_Base_MasterGain;
+#endif
+
+#ifndef NO_DMAHD
+	if (dmaHD_Enabled())
+		return dmaHD_Init(si);
 #endif
 
 	return qtrue;

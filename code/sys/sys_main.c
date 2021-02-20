@@ -355,7 +355,7 @@ void Sys_AnsiColorPrint( const char *msg )
 {
 	static char buffer[ MAXPRINTMSG ];
 	int         length = 0;
-	static int  q3ToAnsi[ 8 ] =
+	static int  q3ToAnsi[ 10 ] =
 	{
 		30, // COLOR_BLACK
 		31, // COLOR_RED
@@ -364,7 +364,9 @@ void Sys_AnsiColorPrint( const char *msg )
 		34, // COLOR_BLUE
 		36, // COLOR_CYAN
 		35, // COLOR_MAGENTA
-		0   // COLOR_WHITE
+		 0, // COLOR_WHITE
+		33, // COLOR_ORANGE (display as yellow)
+		32, // COLOR_OLIVE  (display as green)
 	};
 
 	while( *msg )
@@ -756,9 +758,12 @@ int main( int argc, char **argv )
 	Com_Init( commandLine );
 	NET_Init( );
 
+	// Let debug builds crash instead of handling the error ourselves.
+#ifdef NDEBUG
 	signal( SIGILL, Sys_SigHandler );
 	signal( SIGFPE, Sys_SigHandler );
 	signal( SIGSEGV, Sys_SigHandler );
+#endif
 	signal( SIGTERM, Sys_SigHandler );
 	signal( SIGINT, Sys_SigHandler );
 

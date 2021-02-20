@@ -63,7 +63,12 @@ void (APIENTRYP qglMultiTexCoord2fARB) (GLenum target, GLfloat s, GLfloat t);
 void (APIENTRYP qglLockArraysEXT) (GLint first, GLsizei count);
 void (APIENTRYP qglUnlockArraysEXT) (void);
 
-#define GLE(ret, name, ...) name##proc * qgl##name = NULL;
+#ifdef USE_ALTGAMMA
+void GLimp_InitGamma(void);
+void GLimp_ShutdownGamma(void);
+#endif
+
+#define GLE(ret, name, ...) name##proc * qgl##name;
 QGL_1_1_PROCS;
 QGL_1_1_FIXED_FUNCTION_PROCS;
 QGL_DESKTOP_1_1_PROCS;
@@ -90,6 +95,10 @@ void GLimp_Shutdown( void )
 	ri.IN_Shutdown();
 
 	SDL_QuitSubSystem( SDL_INIT_VIDEO );
+
+#ifdef USE_ALTGAMMA
+	GLimp_ShutdownGamma();
+#endif
 }
 
 /*
@@ -1005,6 +1014,10 @@ void GLimp_Init( qboolean fixedFunction )
 		ri.Cvar_Set( "com_abnormalExit", "0" );
 	}
 
+#ifdef USE_ALTGAMMA
+	GLimp_InitGamma();
+#endif
+
 	ri.Sys_GLimpInit( );
 
 	// Create the window and set up the context
@@ -1028,7 +1041,7 @@ void GLimp_Init( qboolean fixedFunction )
 	}
 
 	// Nothing worked, give up
-	ri.Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem" );
+	ri.Error( ERR_FATAL, "GLimp_Init() - could not load OpenGL subsystem - get help on the official website: https://www.urbanterror.info/support/manual/faq/\n" );
 
 success:
 	// These values force the UI to disable driver selection

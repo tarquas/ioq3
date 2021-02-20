@@ -47,7 +47,7 @@ vec4_t		colorLtGrey	= {0.75, 0.75, 0.75, 1};
 vec4_t		colorMdGrey	= {0.5, 0.5, 0.5, 1};
 vec4_t		colorDkGrey	= {0.25, 0.25, 0.25, 1};
 
-vec4_t	g_color_table[8] =
+vec4_t	g_color_table[10] =
 	{
 	{0.0, 0.0, 0.0, 1.0},
 	{1.0, 0.0, 0.0, 1.0},
@@ -57,6 +57,8 @@ vec4_t	g_color_table[8] =
 	{0.0, 1.0, 1.0, 1.0},
 	{1.0, 0.0, 1.0, 1.0},
 	{1.0, 1.0, 1.0, 1.0},
+	{0.88, 0.31, 0.13, 1.0},
+	{0.29, 0.30, 0.19, 1.0},
 	};
 
 
@@ -865,6 +867,11 @@ void Vector4Scale( const vec4_t in, vec_t scale, vec4_t out ) {
 	out[3] = in[3]*scale;
 }
 
+void VectorMultiply(vec3_t v, const float val) {
+	v[0] *= val;
+	v[1] *= val;
+	v[2] *= val;
+}
 
 int Q_log2( int val ) {
 	int answer;

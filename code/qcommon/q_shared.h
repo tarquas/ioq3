@@ -26,36 +26,18 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 // q_shared.h -- included first by ALL program modules.
 // A user mod should never modify this file
 
-#ifdef STANDALONE
-  #define PRODUCT_NAME				"iofoo3"
-  #define BASEGAME					"foobar"
-  #define CLIENT_WINDOW_TITLE		"changeme"
-  #define CLIENT_WINDOW_MIN_TITLE	"changeme2"
-  #define HOMEPATH_NAME_UNIX		".foo"
-  #define HOMEPATH_NAME_WIN			"FooBar"
-  #define HOMEPATH_NAME_MACOSX		HOMEPATH_NAME_WIN
-//  #define STEAMPATH_NAME			"Foo Bar"
-//  #define STEAMPATH_APPID         ""
-  #define GAMENAME_FOR_MASTER		"foobar"	// must NOT contain whitespace
-  #define CINEMATICS_LOGO		"foologo.roq"
-  #define CINEMATICS_INTRO		"intro.roq"
-//  #define LEGACY_PROTOCOL	// You probably don't need this for your standalone game
-#else
-  #define PRODUCT_NAME				"ioq3"
-  #define BASEGAME					"baseq3"
-  #define CLIENT_WINDOW_TITLE		"ioquake3"
-  #define CLIENT_WINDOW_MIN_TITLE	"ioq3"
-  #define HOMEPATH_NAME_UNIX		".q3a"
-  #define HOMEPATH_NAME_WIN			"Quake3"
-  #define HOMEPATH_NAME_MACOSX		HOMEPATH_NAME_WIN
-  #define STEAMPATH_NAME			"Quake 3 Arena"
-  #define STEAMPATH_APPID			"2200"
-  #define GOGPATH_ID				"1441704920"
-  #define GAMENAME_FOR_MASTER		"Quake3Arena"
-  #define CINEMATICS_LOGO		"idlogo.RoQ"
-  #define CINEMATICS_INTRO		"intro.RoQ"
-  #define LEGACY_PROTOCOL
-#endif
+#define PRODUCT_NAME				"ioq3-UrT"
+#define BASEGAME					"q3ut4"
+#define CLIENT_WINDOW_TITLE		"Urban Terror"
+#define CLIENT_WINDOW_MIN_TITLE	"Urban Terror"
+#define HOMEPATH_NAME_UNIX		".q3a"
+#define HOMEPATH_NAME_WIN			"Quake3"
+#define HOMEPATH_NAME_MACOSX		HOMEPATH_NAME_WIN
+#define GAMENAME_FOR_MASTER		"Quake3Arena"
+#define CINEMATICS_LOGO			"idlogo.RoQ"
+#define CINEMATICS_INTRO			"intro.RoQ"
+#define LEGACY_PROTOCOL
+
 
 // Heartbeat for dpmaster protocol. You shouldn't change this unless you know what you're doing
 #define HEARTBEAT_FOR_MASTER		"DarkPlaces"
@@ -265,6 +247,9 @@ typedef int		clipHandle_t;
 
 #define	MAX_NAME_LENGTH		32		// max length of a client name
 
+#define MAX_MAPLIST_SIZE    8       // Maximum number of maps to display upon partial name multiple match
+#define MAX_MAPLIST_STRING  8192    // Length of the string retrieved using FS_GetFileList
+
 #define	MAX_SAY_TEXT	150
 
 // parameters for command buffer stuffing
@@ -421,8 +406,9 @@ qboolean Q_IsColorString(const char *p);  // ^[0-9a-zA-Z]
 #define COLOR_CYAN	'5'
 #define COLOR_MAGENTA	'6'
 #define COLOR_WHITE	'7'
-#define ColorIndexForNumber(c) ((c) & 0x07)
-#define ColorIndex(c) (ColorIndexForNumber((c) - '0'))
+#define COLOR_ORANGE 	'8'
+#define COLOR_OLIVE 	'9'
+#define ColorIndex(c)  ( ( (c) - '0' ) % 10 )
 
 #define S_COLOR_BLACK	"^0"
 #define S_COLOR_RED	"^1"
@@ -432,8 +418,10 @@ qboolean Q_IsColorString(const char *p);  // ^[0-9a-zA-Z]
 #define S_COLOR_CYAN	"^5"
 #define S_COLOR_MAGENTA	"^6"
 #define S_COLOR_WHITE	"^7"
+#define S_COLOR_ORANGE 	"^8"
+#define S_COLOR_OLIVE  	"^9"
 
-extern vec4_t	g_color_table[8];
+extern vec4_t	g_color_table[10];
 
 #define	MAKERGB( v, r, g, b ) v[0]=r;v[1]=g;v[2]=b
 #define	MAKERGBA( v, r, g, b, a ) v[0]=r;v[1]=g;v[2]=b;v[3]=a
@@ -550,6 +538,9 @@ void ByteToDir( int b, vec3_t dir );
 #define VectorCopy(a,b)			((b)[0]=(a)[0],(b)[1]=(a)[1],(b)[2]=(a)[2])
 #define	VectorScale(v, s, o)	((o)[0]=(v)[0]*(s),(o)[1]=(v)[1]*(s),(o)[2]=(v)[2]*(s))
 #define	VectorMA(v, s, b, o)	((o)[0]=(v)[0]+(b)[0]*(s),(o)[1]=(v)[1]+(b)[1]*(s),(o)[2]=(v)[2]+(b)[2]*(s))
+#define VectorRotateX(v, q, o)  ((o)[1]=(v)[1]*cos(q)-(v)[2]*sin(q),(o)[2]=(v)[1]*sin(q)+(v)[2]*cos(q),(o)[0]=(v)[0])
+#define VectorRotateY(v, q, o)  ((o)[2]=(v)[2]*cos(q)-(v)[0]*sin(q),(o)[0]=(v)[2]*sin(q)+(v)[0]*cos(q),(o)[1]=(v)[1])
+#define VectorRotateZ(v, q, o)  ((o)[0]=(v)[0]*cos(q)-(v)[1]*sin(q),(o)[1]=(v)[0]*sin(q)+(v)[1]*cos(q),(o)[2]=(v)[2])
 
 #else
 
@@ -676,6 +667,7 @@ void CrossProduct( const vec3_t v1, const vec3_t v2, vec3_t cross );
 
 vec_t VectorNormalize (vec3_t v);		// returns vector length
 vec_t VectorNormalize2( const vec3_t v, vec3_t out );
+void VectorMultiply(vec3_t v, float val);
 void Vector4Scale( const vec4_t in, vec_t scale, vec4_t out );
 void VectorRotate( vec3_t in, vec3_t matrix[3], vec3_t out );
 int Q_log2(int val);
@@ -739,7 +731,7 @@ void PerpendicularVector( vec3_t dst, const vec3_t src );
 
 float Com_Clamp( float min, float max, float value );
 
-char	*COM_SkipPath( char *pathname );
+const char	*COM_SkipPath( const char *pathname );
 const char	*COM_GetExtension( const char *name );
 void	COM_StripExtension(const char *in, char *out, int destsize);
 qboolean COM_CompareExtension(const char *in, const char *ext);
@@ -834,6 +826,8 @@ int Q_PrintStrlen( const char *string );
 char *Q_CleanStr( char *string );
 // Count the number of char tocount encountered in string
 int Q_CountChar(const char *string, char tocount);
+
+char *Q_SizeFormat(float number, float factor);
 
 //=============================================
 
@@ -1052,10 +1046,11 @@ typedef struct {
 
 // in order from highest priority to lowest
 // if none of the catchers are active, bound key strings will be executed
-#define KEYCATCH_CONSOLE		0x0001
-#define	KEYCATCH_UI					0x0002
-#define	KEYCATCH_MESSAGE		0x0004
-#define	KEYCATCH_CGAME			0x0008
+#define KEYCATCH_CONSOLE    0x0001
+#define KEYCATCH_UI         0x0002
+#define KEYCATCH_MESSAGE    0x0004
+#define KEYCATCH_CGAME      0x0008
+#define KEYCATCH_RADIO      0x0010
 
 
 // sound channels
@@ -1092,7 +1087,7 @@ typedef enum {
 // per-level limits
 //
 #define	MAX_CLIENTS			64		// absolute limit
-#define MAX_LOCATIONS		64
+#define MAX_LOCATIONS		360   // UrT - previously 64
 
 #define	GENTITYNUM_BITS		10		// don't need to send any more
 #define	MAX_GENTITIES		(1<<GENTITYNUM_BITS)
@@ -1427,7 +1422,6 @@ typedef enum _flag_status {
 #define SAY_TEAM	1
 #define SAY_TELL	2
 
-#define CDKEY_LEN 16
 #define CDCHKSUM_LEN 2
 
 

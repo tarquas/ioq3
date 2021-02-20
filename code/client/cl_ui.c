@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include <stddef.h>
 #include "client.h"
 
 #include "../botlib/botlib.h"
@@ -40,6 +41,89 @@ static void GetClientState( uiClientState_t *state ) {
 	Q_strncpyz( state->updateInfoString, cls.updateInfoString, sizeof( state->updateInfoString ) );
 	Q_strncpyz( state->messageString, clc.serverMessage, sizeof( state->messageString ) );
 	state->clientNum = cl.snap.ps.clientNum;
+#ifdef USE_AUTH
+	Q_strncpyz( state->serverAddress, NET_AdrToStringwPort(clc.serverAddress), sizeof( state->serverAddress ) );
+#endif
+}
+
+/*
+====================
+ConvertServersInfo
+====================
+*/
+static void ConvertServersInfo(serverInfo_t *dst, int *dstCount, const legacyServerInfo_t *src, int srcCount)
+{
+	int i = 0;
+	for (i = 0; i < srcCount; i++) {
+		serverInfo_t *dinfo = &dst[*dstCount];
+		const legacyServerInfo_t *sinfo = &src[i];
+
+		if (sinfo->adr.type != NA_IP)
+			continue;
+
+		dinfo->adr.type = NA_IP;
+		memcpy(dinfo->adr.ip, sinfo->adr.ip, sizeof(dinfo->adr.ip));
+		dinfo->adr.port = sinfo->adr.port;
+		// copy every field from the hostName up to g_needpass
+		memcpy(dinfo->hostName, sinfo->hostName, sizeof(legacyServerInfo_t) - offsetof(legacyServerInfo_t, hostName));
+
+		dinfo->g_needpass = sinfo->password;
+		dinfo->g_humanplayers = sinfo->clients - sinfo->bots;
+
+		(*dstCount)++;
+	}
+}
+
+/*
+====================
+LoadCachedServersFile
+====================
+*/
+static qboolean LoadCachedServersFile (char *file)
+{
+	fileHandle_t fileIn;
+	int fileSize = FS_SV_FOpenFileRead(file, &fileIn);
+	int size;
+	qboolean ret = qtrue;
+
+	int nummplayerservers, numglobalservers, numfavoriteservers;
+	static legacyServerInfo_t globalServers[MAX_GLOBAL_SERVERS],
+	                          favoriteServers[MAX_OTHER_SERVERS],
+	                          mplayerServers[MAX_OTHER_SERVERS];
+
+	if (fileSize <= 0)
+		return qfalse;
+
+	if (fileSize == 4 * sizeof(int) + sizeof(globalServers) + sizeof(favoriteServers) + sizeof(mplayerServers)) {
+		FS_Read(&numglobalservers, sizeof(int), fileIn);
+		FS_Read(&nummplayerservers, sizeof(int), fileIn);
+		FS_Read(&numfavoriteservers, sizeof(int), fileIn);
+		FS_Read(&size, sizeof(int), fileIn);
+		if (size == fileSize - 4*sizeof(int)) {
+			Com_Printf("Importing old servercache.dat\n");
+			FS_Read(&globalServers, sizeof(globalServers), fileIn);
+			FS_Read(&mplayerServers, sizeof(mplayerServers), fileIn);
+			FS_Read(&favoriteServers, sizeof(favoriteServers), fileIn);
+
+			ConvertServersInfo(cls.globalServers, &cls.numglobalservers, globalServers, numglobalservers);
+			ConvertServersInfo(cls.favoriteServers, &cls.numfavoriteservers, favoriteServers, numfavoriteservers);
+		} else {
+			ret = qfalse;
+		}
+	} else {
+		FS_Read(&cls.numglobalservers, sizeof(int), fileIn);
+		FS_Read(&cls.numfavoriteservers, sizeof(int), fileIn);
+		FS_Read(&size, sizeof(int), fileIn);
+		if (size == sizeof(cls.globalServers) + sizeof(cls.favoriteServers)) {
+			FS_Read(&cls.globalServers, sizeof(cls.globalServers), fileIn);
+			FS_Read(&cls.favoriteServers, sizeof(cls.favoriteServers), fileIn);
+		} else {
+			ret = qfalse;
+		}
+	}
+	FS_FCloseFile(fileIn);
+
+	return ret;
 }
 
 /*
@@ -48,22 +132,11 @@ LAN_LoadCachedServers
 ====================
 */
 void LAN_LoadCachedServers( void ) {
-	int size;
-	fileHandle_t fileIn;
 	cls.numglobalservers = cls.numfavoriteservers = 0;
 	cls.numGlobalServerAddresses = 0;
-	if (FS_SV_FOpenFileRead("servercache.dat", &fileIn)) {
-		FS_Read(&cls.numglobalservers, sizeof(int), fileIn);
-		FS_Read(&cls.numfavoriteservers, sizeof(int), fileIn);
-		FS_Read(&size, sizeof(int), fileIn);
-		if (size == sizeof(cls.globalServers) + sizeof(cls.favoriteServers)) {
-			FS_Read(&cls.globalServers, sizeof(cls.globalServers), fileIn);
-			FS_Read(&cls.favoriteServers, sizeof(cls.favoriteServers), fileIn);
-		} else {
-			cls.numglobalservers = cls.numfavoriteservers = 0;
-			cls.numGlobalServerAddresses = 0;
-		}
-		FS_FCloseFile(fileIn);
+
+	if (!LoadCachedServersFile("servercachev2.dat")) {
+		LoadCachedServersFile("servercache.dat");
 	}
 }
 
@@ -74,7 +147,7 @@ LAN_SaveServersToCache
 */
 void LAN_SaveServersToCache( void ) {
 	int size;
-	fileHandle_t fileOut = FS_SV_FOpenFileWrite("servercache.dat");
+	fileHandle_t fileOut = FS_SV_FOpenFileWrite("servercachev2.dat");
 	FS_Write(&cls.numglobalservers, sizeof(int), fileOut);
 	FS_Write(&cls.numfavoriteservers, sizeof(int), fileOut);
 	size = sizeof(cls.globalServers) + sizeof(cls.favoriteServers);
@@ -289,6 +362,7 @@ static void LAN_GetServerInfo( int source, int n, char *buf, int buflen ) {
 		Info_SetValueForKey( info, "hostname", server->hostName);
 		Info_SetValueForKey( info, "mapname", server->mapName);
 		Info_SetValueForKey( info, "clients", va("%i",server->clients));
+		Info_SetValueForKey( info, "bots", va("%i",server->bots));
 		Info_SetValueForKey( info, "sv_maxclients", va("%i",server->maxClients));
 		Info_SetValueForKey( info, "ping", va("%i",server->ping));
 		Info_SetValueForKey( info, "minping", va("%i",server->minPing));
@@ -300,6 +374,9 @@ static void LAN_GetServerInfo( int source, int n, char *buf, int buflen ) {
 		Info_SetValueForKey( info, "punkbuster", va("%i", server->punkbuster));
 		Info_SetValueForKey( info, "g_needpass", va("%i", server->g_needpass));
 		Info_SetValueForKey( info, "g_humanplayers", va("%i", server->g_humanplayers));
+		Info_SetValueForKey( info, "auth", va("%i", server->auth));
+		Info_SetValueForKey( info, "password", va("%i", server->password));
+		Info_SetValueForKey( info, "modversion", server->modversion);
 		Q_strncpyz(buf, info, buflen);
 	} else {
 		if (buf) {
@@ -634,50 +711,6 @@ static void Key_GetBindingBuf( int keynum, char *buf, int buflen ) {
 
 /*
 ====================
-CLUI_GetCDKey
-====================
-*/
-static void CLUI_GetCDKey( char *buf, int buflen ) {
-#ifndef STANDALONE
-	const char *gamedir;
-	gamedir = Cvar_VariableString( "fs_game" );
-	if (UI_usesUniqueCDKey() && gamedir[0] != 0) {
-		Com_Memcpy( buf, &cl_cdkey[16], 16);
-		buf[16] = 0;
-	} else {
-		Com_Memcpy( buf, cl_cdkey, 16);
-		buf[16] = 0;
-	}
-#else
-	*buf = 0;
-#endif
-}
-
-
-/*
-====================
-CLUI_SetCDKey
-====================
-*/
-#ifndef STANDALONE
-static void CLUI_SetCDKey( char *buf ) {
-	const char *gamedir;
-	gamedir = Cvar_VariableString( "fs_game" );
-	if (UI_usesUniqueCDKey() && gamedir[0] != 0) {
-		Com_Memcpy( &cl_cdkey[16], buf, 16 );
-		cl_cdkey[32] = 0;
-		// set the flag so the fle will be written at the next opportunity
-		cvar_modifiedFlags |= CVAR_ARCHIVE;
-	} else {
-		Com_Memcpy( cl_cdkey, buf, 16 );
-		// set the flag so the fle will be written at the next opportunity
-		cvar_modifiedFlags |= CVAR_ARCHIVE;
-	}
-}
-#endif
-
-/*
-====================
 GetConfigString
 ====================
 */
@@ -980,13 +1013,9 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return Hunk_MemoryRemaining();
 
 	case UI_GET_CDKEY:
-		CLUI_GetCDKey( VMA(1), args[2] );
 		return 0;
 
 	case UI_SET_CDKEY:
-#ifndef STANDALONE
-		CLUI_SetCDKey( VMA(1) );
-#endif
 		return 0;
 	
 	case UI_SET_PBCLSTATUS:
@@ -1070,7 +1099,34 @@ intptr_t CL_UISystemCalls( intptr_t *args ) {
 		return 0;
 
 	case UI_VERIFY_CDKEY:
-		return CL_CDKeyValidate(VMA(1), VMA(2));
+		return 0;
+
+#ifdef USE_AUTH
+	case UI_NET_STRINGTOADR:
+		return NET_StringToAdr( VMA(1), VMA(2), NA_IP);
+
+	case UI_Q_VSNPRINTF:
+		return Q_vsnprintf( VMA(1), *((size_t *)VMA(2)), VMA(3), VMA(4));
+
+	case UI_NET_SENDPACKET:
+		{
+			netadr_t addr;
+			const char * destination = VMA(4);
+
+			NET_StringToAdr( destination, &addr, NA_IP);
+			NET_SendPacket( args[1], args[2], VMA(3), addr );
+		}
+		return 0;
+
+	case UI_COPYSTRING:
+		CopyString(VMA(1));
+		return 0;
+
+	//case UI_SYS_STARTPROCESS:
+	//	Sys_StartProcess( VMA(1), VMA(2) );
+	//	return 0;
+
+#endif
 		
 	default:
 		Com_Error( ERR_DROP, "Bad UI system trap: %ld", (long int) args[0] );
@@ -1141,16 +1197,6 @@ void CL_InitUI( void ) {
 		VM_Call( uivm, UI_INIT, (clc.state >= CA_AUTHORIZING && clc.state < CA_ACTIVE) );
 	}
 }
-
-#ifndef STANDALONE
-qboolean UI_usesUniqueCDKey( void ) {
-	if (uivm) {
-		return (VM_Call( uivm, UI_HASUNIQUECDKEY) == qtrue);
-	} else {
-		return qfalse;
-	}
-}
-#endif
 
 /*
 ====================

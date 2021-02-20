@@ -136,22 +136,41 @@ static void SV_WriteSnapshotToClient( client_t *client, msg_t *msg ) {
 	} else if ( client->netchan.outgoingSequence - client->deltaMessage 
 		>= (PACKET_BACKUP - 3) ) {
 		// client hasn't gotten a good message through in a long time
-		Com_DPrintf ("%s: Delta request from out of date packet.\n", client->name);
 		oldframe = NULL;
 		lastframe = 0;
+	} else if (client->demo_recording && client->demo_deltas <= 0) {
+		// if we're recording this client, force full frames every now and then
+		oldframe = NULL;
+		lastframe = 0;
+		// once we reach 1 full frame for every 1024 delta frames we stay there
+		// TODO: these numbers need to be tweaked properly, the current values
+		// just seem to work "fine" for all the tests we ran...
+		if (client->demo_backoff < 1024) {
+			client->demo_backoff *= 2;
+		}
+		client->demo_deltas = client->demo_backoff;
 	} else {
+		// count down delta frames to know when we need to send the next full frame
+		if (client->demo_recording) {
+			client->demo_deltas--;
+		}
+		
 		// we have a valid snapshot to delta from
 		oldframe = &client->frames[ client->deltaMessage & PACKET_MASK ];
 		lastframe = client->netchan.outgoingSequence - client->deltaMessage;
 
 		// the snapshot's entities may still have rolled off the buffer, though
 		if ( oldframe->first_entity <= svs.nextSnapshotEntities - svs.numSnapshotEntities ) {
-			Com_DPrintf ("%s: Delta request from out of date entities.\n", client->name);
 			oldframe = NULL;
 			lastframe = 0;
 		}
 	}
 
+	// start recording only once there's a non-delta frame to start with
+	if (!oldframe && client->demo_recording && client->demo_waiting) {
+		client->demo_waiting = qfalse;
+	}
+	
 	MSG_WriteByte (msg, svc_snapshot);
 
 	// NOTE, MRE: now sent at the start of every message from server to client
@@ -541,21 +560,18 @@ static void SV_WriteVoipToClient(client_t *cl, msg_t *msg)
 		{
 			packet = cl->voipPacket[(i + cl->queuedVoipIndex) % ARRAY_LEN(cl->voipPacket)];
 
-			if(!*cl->downloadName)
-			{
-        			totalbytes += packet->len;
-	        		if (totalbytes > (msg->maxsize - msg->cursize) / 2)
-		        		break;
+			totalbytes += packet->len;
+			if (totalbytes > (msg->maxsize - msg->cursize) / 2)
+				break;
 
-        			MSG_WriteByte(msg, svc_voipOpus);
-        			MSG_WriteShort(msg, packet->sender);
-	        		MSG_WriteByte(msg, (byte) packet->generation);
-		        	MSG_WriteLong(msg, packet->sequence);
-		        	MSG_WriteByte(msg, packet->frames);
-        			MSG_WriteShort(msg, packet->len);
-        			MSG_WriteBits(msg, packet->flags, VOIP_FLAGCNT);
-	        		MSG_WriteData(msg, packet->data, packet->len);
-                        }
+			MSG_WriteByte(msg, svc_voipOpus);
+			MSG_WriteShort(msg, packet->sender);
+			MSG_WriteByte(msg, (byte) packet->generation);
+			MSG_WriteLong(msg, packet->sequence);
+			MSG_WriteByte(msg, packet->frames);
+			MSG_WriteShort(msg, packet->len);
+			MSG_WriteBits(msg, packet->flags, VOIP_FLAGCNT);
+			MSG_WriteData(msg, packet->data, packet->len);
 
 			Z_Free(packet);
 		}
@@ -576,6 +592,10 @@ Called by SV_SendClientSnapshot and SV_SendClientGameState
 */
 void SV_SendMessageToClient(msg_t *msg, client_t *client)
 {
+	if (client->demo_recording && !client->demo_waiting) {
+		SVD_WriteDemoFile(client, msg);
+	}
+	
 	// record information about the message
 	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSize = msg->cursize;
 	client->frames[client->netchan.outgoingSequence & PACKET_MASK].messageSent = svs.time;
@@ -656,9 +676,6 @@ void SV_SendClientMessages(void)
 		if(svs.time - c->lastSnapshotTime < c->snapshotMsec * com_timescale->value)
 			continue;		// It's not time yet
 
-		if(*c->downloadName)
-			continue;		// Client is downloading, don't send snapshots
-
 		if(c->netchan.unsentFragments || c->netchan_start_queue)
 		{
 			c->rateDelayed = qtrue;
@@ -681,5 +698,27 @@ void SV_SendClientMessages(void)
 		SV_SendClientSnapshot(c);
 		c->lastSnapshotTime = svs.time;
 		c->rateDelayed = qfalse;
+	}
+}
+
+void SV_CheckClientUserinfoTimer( void ) {
+	int			i;
+	client_t	*cl;
+	char 		bigbuffer[MAX_INFO_STRING * 2];
+
+	for (i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++) {
+		if (!cl->state) {
+			continue; // not connected
+		}
+
+		if ( (sv_floodProtect->integer) && (svs.time >= cl->nextReliableUserTime) && (cl->state >= CS_ACTIVE) && (cl->userinfobuffer[0] != 0) )
+		{
+			// We have something in the buffer
+			// and it's time to process it
+			Com_sprintf(bigbuffer, sizeof(bigbuffer), "userinfo \"%s\"", cl->userinfobuffer);
+
+			Cmd_TokenizeString(bigbuffer);
+			SV_UpdateUserinfo_f(cl);
+		}
 	}
 }

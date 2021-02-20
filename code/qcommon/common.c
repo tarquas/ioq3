@@ -32,14 +32,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 int demo_protocols[] =
-{ 67, 66, 0 };
+{ 67, 66, 68, 0 };
 
 #define MAX_NUM_ARGVS	50
 
-#define MIN_DEDICATED_COMHUNKMEGS 1
-#define MIN_COMHUNKMEGS		56
-#define DEF_COMHUNKMEGS 	128
-#define DEF_COMZONEMEGS		24
+#define MIN_DEDICATED_COMHUNKMEGS 96
+#define MIN_COMHUNKMEGS		768
+#define DEF_COMHUNKMEGS		1024
+#define DEF_COMZONEMEGS		32
 #define DEF_COMHUNKMEGS_S	XSTRING(DEF_COMHUNKMEGS)
 #define DEF_COMZONEMEGS_S	XSTRING(DEF_COMZONEMEGS)
 
@@ -86,7 +86,6 @@ cvar_t	*com_maxfpsUnfocused;
 cvar_t	*com_minimized;
 cvar_t	*com_maxfpsMinimized;
 cvar_t	*com_abnormalExit;
-cvar_t	*com_standalone;
 cvar_t	*com_gamename;
 cvar_t	*com_protocol;
 #ifdef LEGACY_PROTOCOL
@@ -95,6 +94,7 @@ cvar_t	*com_legacyprotocol;
 cvar_t	*com_basegame;
 cvar_t  *com_homepath;
 cvar_t	*com_busyWait;
+cvar_t	*com_logfileName;
 #ifndef DEDICATED
 cvar_t  *con_autochat;
 #endif
@@ -121,6 +121,8 @@ qboolean	com_gameRestarting = qfalse;
 qboolean	com_gameClientRestarting = qfalse;
 
 char	com_errorMessage[MAXPRINTMSG];
+
+static	qboolean isDevPrint = qfalse;
 
 void Com_WriteConfig_f( void );
 void CIN_CloseAllVideos( void );
@@ -186,7 +188,10 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 	}
 
 #ifndef DEDICATED
-	CL_ConsolePrint( msg );
+	if (isDevPrint)
+		CL_DevConsolePrint( msg );
+	else
+		CL_ConsolePrint( msg );
 #endif
 
 	// echo to dedicated console and early console
@@ -205,7 +210,7 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 			time( &aclock );
 			newtime = localtime( &aclock );
 
-			logfile = FS_FOpenFileWrite( "qconsole.log" );
+			logfile = FS_FOpenFileWrite( com_logfileName->string );
 			
 			if(logfile)
 			{
@@ -220,7 +225,7 @@ void QDECL Com_Printf( const char *fmt, ... ) {
 			}
 			else
 			{
-				Com_Printf("Opening qconsole.log failed!\n");
+				Com_Printf("Opening %s failed!\n", com_logfileName->string);
 				Cvar_SetValue("logfile", 0);
 			}
 
@@ -252,7 +257,9 @@ void QDECL Com_DPrintf( const char *fmt, ...) {
 	Q_vsnprintf (msg, sizeof(msg), fmt, argptr);
 	va_end (argptr);
 	
+	isDevPrint = qtrue;
 	Com_Printf ("%s", msg);
+	isDevPrint = qfalse;
 }
 
 /*
@@ -423,8 +430,13 @@ Break it up into multiple console lines
 */
 void Com_ParseCommandLine( char *commandLine ) {
     int inq = 0;
-    com_consoleLines[0] = commandLine;
-    com_numConsoleLines = 1;
+
+    if ( !*commandLine ) {
+        return;
+    }
+
+    com_consoleLines[com_numConsoleLines] = commandLine;
+    com_numConsoleLines++;
 
     while ( *commandLine ) {
         if (*commandLine == '"') {
@@ -442,6 +454,26 @@ void Com_ParseCommandLine( char *commandLine ) {
         }
         commandLine++;
     }
+}
+
+void Com_ParseCommandFile( int slot, char *dir )
+{
+    static char commandLine[3][MAX_STRING_CHARS] = {0};
+    FILE *fp;
+
+    assert( slot < sizeof(commandLine) / sizeof(*commandLine) );
+
+    fp = Sys_FOpen(va("%s%c%s", dir, PATH_SEP, COMMAND_FILE_NAME), "rb");
+    if (!fp) {
+        return;
+    }
+
+    if (fread(commandLine[slot], 1, sizeof(*commandLine) - 1, fp) > 0) {
+        Com_ParseCommandLine(commandLine[slot]);
+    }
+
+    fclose(fp);
+
 }
 
 
@@ -1020,7 +1052,7 @@ void *Z_TagMalloc( int size, int tag ) {
 	base->tag = tag;			// no longer a free block
 	
 	zone->rover = base->next;	// next allocation will start looking here
-	zone->used += base->size;	//
+	zone->used += base->size;
 	
 	base->id = ZONEID;
 
@@ -1743,7 +1775,7 @@ void *Hunk_Alloc( int size, ha_pref preference ) {
 
 		Com_Error(ERR_DROP, "Hunk_Alloc failed on %i: %s, line: %d (%s)", size, file, line, label);
 #else
-		Com_Error(ERR_DROP, "Hunk_Alloc failed on %i", size);
+		Com_Error(ERR_DROP, "Hunk_Alloc failed on %i - try raising the value of the com_hunkMegs cvar and restart your game.", size);
 #endif
 	}
 
@@ -2444,129 +2476,6 @@ void Com_GameRestart_f(void)
 	Com_GameRestart(0, qtrue);
 }
 
-#ifndef STANDALONE
-
-// TTimo: centralizing the cl_cdkey stuff after I discovered a buffer overflow problem with the dedicated server version
-//   not sure it's necessary to have different defaults for regular and dedicated, but I don't want to risk it
-//   https://zerowing.idsoftware.com/bugzilla/show_bug.cgi?id=470
-#ifndef DEDICATED
-char	cl_cdkey[34] = "                                ";
-#else
-char	cl_cdkey[34] = "123456789";
-#endif
-
-/*
-=================
-Com_ReadCDKey
-=================
-*/
-qboolean CL_CDKeyValidate( const char *key, const char *checksum );
-void Com_ReadCDKey( const char *filename ) {
-	fileHandle_t	f;
-	char			buffer[33];
-	char			fbuffer[MAX_OSPATH];
-
-	Com_sprintf(fbuffer, sizeof(fbuffer), "%s/q3key", filename);
-
-	FS_SV_FOpenFileRead( fbuffer, &f );
-	if ( !f ) {
-		Q_strncpyz( cl_cdkey, "                ", 17 );
-		return;
-	}
-
-	Com_Memset( buffer, 0, sizeof(buffer) );
-
-	FS_Read( buffer, 16, f );
-	FS_FCloseFile( f );
-
-	if (CL_CDKeyValidate(buffer, NULL)) {
-		Q_strncpyz( cl_cdkey, buffer, 17 );
-	} else {
-		Q_strncpyz( cl_cdkey, "                ", 17 );
-	}
-}
-
-/*
-=================
-Com_AppendCDKey
-=================
-*/
-void Com_AppendCDKey( const char *filename ) {
-	fileHandle_t	f;
-	char			buffer[33];
-	char			fbuffer[MAX_OSPATH];
-
-	Com_sprintf(fbuffer, sizeof(fbuffer), "%s/q3key", filename);
-
-	FS_SV_FOpenFileRead( fbuffer, &f );
-	if (!f) {
-		Q_strncpyz( &cl_cdkey[16], "                ", 17 );
-		return;
-	}
-
-	Com_Memset( buffer, 0, sizeof(buffer) );
-
-	FS_Read( buffer, 16, f );
-	FS_FCloseFile( f );
-
-	if (CL_CDKeyValidate(buffer, NULL)) {
-		strcat( &cl_cdkey[16], buffer );
-	} else {
-		Q_strncpyz( &cl_cdkey[16], "                ", 17 );
-	}
-}
-
-#ifndef DEDICATED
-/*
-=================
-Com_WriteCDKey
-=================
-*/
-static void Com_WriteCDKey( const char *filename, const char *ikey ) {
-	fileHandle_t	f;
-	char			fbuffer[MAX_OSPATH];
-	char			key[17];
-#ifndef _WIN32
-	mode_t			savedumask;
-#endif
-
-
-	Com_sprintf(fbuffer, sizeof(fbuffer), "%s/q3key", filename);
-
-
-	Q_strncpyz( key, ikey, 17 );
-
-	if(!CL_CDKeyValidate(key, NULL) ) {
-		return;
-	}
-
-#ifndef _WIN32
-	savedumask = umask(0077);
-#endif
-	f = FS_SV_FOpenFileWrite( fbuffer );
-	if ( !f ) {
-		Com_Printf ("Couldn't write CD key to %s.\n", fbuffer );
-		goto out;
-	}
-
-	FS_Write( key, 16, f );
-
-	FS_Printf( f, "\n// generated by quake, do not modify\r\n" );
-	FS_Printf( f, "// Do not give this file to ANYONE.\r\n" );
-	FS_Printf( f, "// id Software and Activision will NOT ask you to send this file to them.\r\n");
-
-	FS_FCloseFile( f );
-out:
-#ifndef _WIN32
-	umask(savedumask);
-#else
-	;
-#endif
-}
-#endif
-
-#endif // STANDALONE
-
 static void Com_DetectAltivec(void)
 {
 	// Only detect if user hasn't forcibly disabled it.
@@ -2676,6 +2585,14 @@ void Com_Init( char *commandLine ) {
 
 	// prepare enough of the subsystems to handle
 	// cvar and command buffer management
+	com_numConsoleLines = 0;
+
+	Com_ParseCommandFile( 0, Sys_BinaryPath() );
+#ifdef DEFAULT_BASEDIR
+	Com_ParseCommandFile( 1, Sys_DefaultInstallPath() );
+#endif
+	Com_ParseCommandFile( 2, Sys_Cwd() );
+
 	Com_ParseCommandLine( commandLine );
 
 //	Swap_Init ();
@@ -2695,7 +2612,6 @@ void Com_Init( char *commandLine ) {
 	// done early so bind command exists
 	CL_InitKeyCommands();
 
-	com_standalone = Cvar_Get("com_standalone", "0", CVAR_ROM);
 	com_basegame = Cvar_Get("com_basegame", BASEGAME, CVAR_INIT);
 	com_homepath = Cvar_Get("com_homepath", "", CVAR_INIT|CVAR_PROTECTED);
 
@@ -2724,7 +2640,7 @@ void Com_Init( char *commandLine ) {
 
   // get dedicated here for proper hunk megs initialization
 #ifdef DEDICATED
-	com_dedicated = Cvar_Get ("dedicated", "1", CVAR_INIT);
+	com_dedicated = Cvar_Get ("dedicated", "2", CVAR_INIT);
 	Cvar_CheckRange( com_dedicated, 1, 2, qtrue );
 #else
 	com_dedicated = Cvar_Get ("dedicated", "0", CVAR_LATCH);
@@ -2741,10 +2657,11 @@ void Com_Init( char *commandLine ) {
 	// init commands and vars
 	//
 	com_altivec = Cvar_Get ("com_altivec", "1", CVAR_ARCHIVE);
-	com_maxfps = Cvar_Get ("com_maxfps", "85", CVAR_ARCHIVE);
+	com_maxfps = Cvar_Get ("com_maxfps", "125", CVAR_ARCHIVE);
 	com_blood = Cvar_Get ("com_blood", "1", CVAR_ARCHIVE);
 
 	com_logfile = Cvar_Get ("logfile", "0", CVAR_TEMP );
+	com_logfileName = Cvar_Get("logfileName", "qconsole.log", CVAR_ARCHIVE);
 
 	com_timescale = Cvar_Get ("timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
 	com_fixedtime = Cvar_Get ("fixedtime", "0", CVAR_CHEAT);
@@ -2943,20 +2860,6 @@ void Com_WriteConfiguration( void ) {
 	cvar_modifiedFlags &= ~CVAR_ARCHIVE;
 
 	Com_WriteConfigToFile( Q3CONFIG_CFG );
-
-	// not needed for dedicated or standalone
-#if !defined(DEDICATED) && !defined(STANDALONE)
-	if(!com_standalone->integer)
-	{
-		const char *gamedir;
-		gamedir = Cvar_VariableString( "fs_game" );
-		if (UI_usesUniqueCDKey() && gamedir[0] != 0) {
-			Com_WriteCDKey( gamedir, &cl_cdkey[16] );
-		} else {
-			Com_WriteCDKey( BASEGAME, cl_cdkey );
-		}
-	}
-#endif
 }
 
 
@@ -3441,15 +3344,15 @@ Field_CompleteFilename
 ===============
 */
 void Field_CompleteFilename( const char *dir,
-		const char *ext, qboolean stripExt, qboolean allowNonPureFilesOnDisk )
+		const char *ext, qboolean stripExt, qboolean searchUnpureDirs, qboolean searchUnpurePaks )
 {
 	matchCount = 0;
 	shortestMatch[ 0 ] = 0;
 
-	FS_FilenameCompletion( dir, ext, stripExt, FindMatches, allowNonPureFilesOnDisk );
+	FS_FilenameCompletion( dir, ext, stripExt, FindMatches, searchUnpureDirs, searchUnpurePaks );
 
 	if( !Field_Complete( ) )
-		FS_FilenameCompletion( dir, ext, stripExt, PrintMatches, allowNonPureFilesOnDisk );
+		FS_FilenameCompletion( dir, ext, stripExt, PrintMatches, searchUnpureDirs, searchUnpurePaks );
 }
 
 /*

@@ -61,9 +61,9 @@ float Com_Clamp( float min, float max, float value ) {
 COM_SkipPath
 ============
 */
-char *COM_SkipPath (char *pathname)
+const char *COM_SkipPath (const char *pathname)
 {
-	char	*last;
+	const char	*last;
 	
 	last = pathname;
 	while (*pathname)
@@ -976,21 +976,24 @@ int Q_PrintStrlen( const char *string ) {
 }
 
 
-char *Q_CleanStr( char *string ) {
-	char*	d;
-	char*	s;
-	int		c;
+char *Q_CleanStr(char *string) {
+
+	char  *d;
+	char  *s;
+	int   c;
 
 	s = string;
 	d = string;
-	while ((c = *s) != 0 ) {
-		if ( Q_IsColorString( s ) ) {
-			s++;
-		}		
-		else if ( c >= 0x20 && c <= 0x7E ) {
+
+	while ((c = *s) != 0) {
+		if (Q_IsColorString(s)) {
+			s += 2;
+		} else if (c >= 0x20 && c <= 0x7E && c != Q_COLOR_ESCAPE) {
 			*d++ = c;
+			s++;
+		} else {
+			s++;
 		}
-		s++;
 	}
 	*d = '\0';
 
@@ -1008,6 +1011,18 @@ int Q_CountChar(const char *string, char tocount)
 	}
 	
 	return count;
+}
+
+char *Q_SizeFormat(float number, float factor) {
+	if (number > (factor * factor * factor * factor))
+		return va("%.02f T", number / (factor * factor * factor * factor));
+	if (number > (factor * factor * factor))
+		return va("%.02f G", number / (factor * factor * factor));
+	if (number > (factor * factor))
+		return va("%.02f M", number / (factor * factor));
+	if (number > factor)
+		return va("%i K", (int)(number / factor));
+	return va("%i ", (int)number);
 }
 
 int QDECL Com_sprintf(char *dest, int size, const char *fmt, ...)

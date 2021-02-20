@@ -48,6 +48,17 @@ typedef struct voipServerPacket_s
 } voipServerPacket_t;
 #endif
 
+#ifdef USE_SKEETMOD
+#define MAX_SKEETS      128     // Max amount of skeets that will be animated in skeed mode
+
+typedef struct skeetInfo_s {
+	qboolean 	valid;        	// qtrue if this entity is a skeet
+	vec3_t      origin;         // coordinates of the skeet spawn point
+	int         shootTime;      // time when the skeet has been shot
+	qboolean    moving;         // whether the skeet is movingin the air or not
+} skeetInfo_t;
+#endif
+
 typedef struct svEntity_s {
 	struct worldSector_s *worldSector;
 	struct svEntity_s *nextEntityInWorldSector;
@@ -58,6 +69,9 @@ typedef struct svEntity_s {
 	int			lastCluster;		// if all the clusters don't fit in clusternums
 	int			areanum, areanum2;
 	int			snapshotCounter;	// used to prevent double adding from portal views
+#ifdef USE_SKEETMOD
+	skeetInfo_t skeetInfo;
+#endif
 } svEntity_t;
 
 typedef enum {
@@ -80,6 +94,10 @@ typedef struct {
 	int				nextFrameTime;		// when time > nextFrameTime, process world
 	char			*configstrings[MAX_CONFIGSTRINGS];
 	svEntity_t		svEntities[MAX_GENTITIES];
+
+#ifdef USE_SKEETMOD
+	svEntity_t      *skeets[MAX_SKEETS];
+#endif
 
 	char			*entityParsePoint;	// used during game VM init
 
@@ -133,6 +151,7 @@ typedef struct netchan_buffer_s {
 typedef struct client_s {
 	clientState_t	state;
 	char			userinfo[MAX_INFO_STRING];		// name, etc
+	char			userinfobuffer[MAX_INFO_STRING]; //used for buffering of user info
 
 	char			reliableCommands[MAX_RELIABLE_COMMANDS][MAX_STRING_CHARS];
 	int				reliableSequence;		// last added reliable message, not necessarily sent or acknowledged yet
@@ -150,21 +169,9 @@ typedef struct client_s {
 	sharedEntity_t	*gentity;			// SV_GentityNum(clientnum)
 	char			name[MAX_NAME_LENGTH];			// extracted from userinfo, high bits masked
 
-	// downloading
-	char			downloadName[MAX_QPATH]; // if not empty string, we are downloading
-	fileHandle_t	download;			// file being downloaded
- 	int				downloadSize;		// total bytes (can't use EOF because of paks)
- 	int				downloadCount;		// bytes sent
-	int				downloadClientBlock;	// last block we sent to the client, awaiting ack
-	int				downloadCurrentBlock;	// current block number
-	int				downloadXmitBlock;	// last block we xmited
-	unsigned char	*downloadBlocks[MAX_DOWNLOAD_WINDOW];	// the buffers for the download blocks
-	int				downloadBlockSize[MAX_DOWNLOAD_WINDOW];
-	qboolean		downloadEOF;		// We have sent the EOF block
-	int				downloadSendTime;	// time we last got an ack from the client
-
 	int				deltaMessage;		// frame last client usercmd message
 	int				nextReliableTime;	// svs.time when another reliable command will be allowed
+	int				nextReliableUserTime; // svs.time when another userinfo change will be allowed
 	int				lastPacketTime;		// svs.time when packet was last received
 	int				lastConnectTime;	// svs.time when connection started
 	int				lastSnapshotTime;	// svs.time of last sent snapshot
@@ -177,12 +184,20 @@ typedef struct client_s {
 	int				pureAuthentic;
 	qboolean  gotCP; // TTimo - additional flag to distinguish between a bad pure checksum, and no cp command at all
 	netchan_t		netchan;
+	int 			numcmds;			// number of client commands so far (in this time period), for sv_floodprotect
+
 	// TTimo
 	// queuing outgoing fragmented messages to send them properly, without udp packet bursts
 	// in case large fragmented messages are stacking up
 	// buffer them into this queue, and hand them out to netchan as needed
 	netchan_buffer_t *netchan_start_queue;
 	netchan_buffer_t **netchan_end_queue;
+
+	qboolean	demo_recording;	// are we currently recording this client?
+	fileHandle_t	demo_file;	// the file we are writing the demo to
+	qboolean	demo_waiting;	// are we still waiting for the first non-delta frame?
+	int		demo_backoff;	// how many packets (-1 actually) between non-delta frames?
+	int		demo_deltas;	// how many delta frames did we let through so far?
 
 #ifdef USE_VOIP
 	qboolean hasVoip;
@@ -199,6 +214,16 @@ typedef struct client_s {
 #ifdef LEGACY_PROTOCOL
 	qboolean		compat;
 #endif
+
+#ifdef USE_AUTH
+	char auth[MAX_NAME_LENGTH];
+#endif
+
+#ifdef USE_SKEETMOD
+	int lastEventSequence;
+	int powerups[MAX_POWERUPS];
+#endif
+
 } client_t;
 
 //=============================================================================
@@ -213,15 +238,12 @@ typedef struct client_s {
 // while not allowing a single ip to grab all challenge resources
 #define MAX_CHALLENGES_MULTI (MAX_CHALLENGES / 2)
 
-#define	AUTHORIZE_TIMEOUT	5000
-
 typedef struct {
 	netadr_t	adr;
 	int			challenge;
 	int			clientChallenge;		// challenge number coming from the client
 	int			time;				// time the last packet was sent to the autherize server
 	int			pingTime;			// time the challenge response was sent to client
-	int			firstTime;			// time the adr was first used, for authorize timeout checks
 	qboolean	wasrefused;
 	qboolean	connected;
 } challenge_t;
@@ -241,11 +263,35 @@ typedef struct {
 	int			nextHeartbeatTime;
 	challenge_t	challenges[MAX_CHALLENGES];	// to prevent invalid IPs from connecting
 	netadr_t	redirectAddress;			// for rcon return messages
-#ifndef STANDALONE
-	netadr_t	authorizeAddress;			// authorize server address
-#endif
 	int			masterResolveTime[MAX_MASTER_SERVERS]; // next svs.time that server should do dns lookup for master server
 } serverStatic_t;
+
+
+// The value below is how many extra characters we reserve for every instance of '$' in a
+// ut_radio, say, or similar client command.  Some jump maps have very long $location's.
+// On these maps, it may be possible to crash the server if a carefully-crafted
+// client command is sent.  The constant below may require further tweaking.  For example,
+// a text of "$location" would have a total computed length of 25, because "$location" has
+// 9 characters, and we increment that by 16 for the '$'.
+#define STRLEN_INCREMENT_PER_DOLLAR_VAR 16
+
+// Don't allow more than this many dollared-strings (e.g. $location) in a client command
+// such as ut_radio and say.  Keep this value low for safety, in case some things like
+// $location expand to very large strings in some maps.  There is really no reason to have
+// more than 6 dollar vars (such as $weapon or $location) in things you tell other people.
+#define MAX_DOLLAR_VARS 6
+
+// When a radio text (as in "ut_radio 1 1 text") is sent, weird things start to happen
+// when the text gets to be greater than 118 in length.  When the text is really large the
+// server will crash.  There is an in-between gray zone above 118, but I don't really want
+// to go there.  This is the maximum length of radio text that can be sent, taking into
+// account increments due to presence of '$'.
+#define MAX_RADIO_STRLEN 118
+
+// Don't allow more than this text length in a command such as say.  I pulled this
+// value out of my ass because I don't really know exactly when problems start to happen.
+// This value takes into account increments due to the presence of '$'.
+#define MAX_SAY_STRLEN 256
 
 #define SERVER_MAXBANS	1024
 // Structure for managing bans
@@ -269,7 +315,6 @@ extern	cvar_t	*sv_timeout;
 extern	cvar_t	*sv_zombietime;
 extern	cvar_t	*sv_rconPassword;
 extern	cvar_t	*sv_privatePassword;
-extern	cvar_t	*sv_allowDownload;
 extern	cvar_t	*sv_maxclients;
 
 extern	cvar_t	*sv_privateClients;
@@ -284,16 +329,16 @@ extern	cvar_t	*sv_mapChecksum;
 extern	cvar_t	*sv_serverid;
 extern	cvar_t	*sv_minRate;
 extern	cvar_t	*sv_maxRate;
-extern	cvar_t	*sv_dlRate;
 extern	cvar_t	*sv_minPing;
 extern	cvar_t	*sv_maxPing;
 extern	cvar_t	*sv_gametype;
 extern	cvar_t	*sv_pure;
+extern	cvar_t	*sv_extraPure;
+extern	cvar_t	*sv_extraPaks;
+extern	cvar_t	*sv_newpurelist;
 extern	cvar_t	*sv_floodProtect;
 extern	cvar_t	*sv_lanForceRate;
-#ifndef STANDALONE
-extern	cvar_t	*sv_strictAuth;
-#endif
+extern	cvar_t	*sv_clientsPerIp;
 extern	cvar_t	*sv_banFile;
 
 extern	serverBan_t serverBans[SERVER_MAXBANS];
@@ -303,7 +348,28 @@ extern	int serverBansCount;
 extern	cvar_t	*sv_voip;
 extern	cvar_t	*sv_voipProtocol;
 #endif
+extern	cvar_t	*sv_demonotice;
+extern  cvar_t  *sv_demofolder;
+extern  cvar_t  *sv_autoRecordDemo;
+extern  cvar_t  *sv_sayprefix;
+extern  cvar_t  *sv_tellprefix;
 
+#ifdef USE_AUTH
+extern	cvar_t	*sv_authServerIP;
+extern	cvar_t	*sv_auth_engine;
+#endif
+
+#ifdef USE_SKEETMOD
+extern  cvar_t  *sv_skeetshoot;         // enable/disable skeetshooting mod
+extern  cvar_t  *sv_skeethitreport;     // report every skeet hit as server message
+extern  cvar_t  *sv_skeethitsound;      // sound to play upon skeet hit
+extern  cvar_t  *sv_skeetpoints;        // how many points for each skeet hit: if 0 will use a distance based point system
+extern  cvar_t  *sv_skeetpointsnotify;  // notify each point scored to the client who performed the shot
+extern  cvar_t  *sv_skeetprotect;       // protect hit/kill of non-skeet entities (i.e. players)
+extern  cvar_t  *sv_skeetspeed;			// speed of each skeet
+extern  cvar_t  *sv_skeetrotate;		// ROLL angle rotation (defaults to 0, range between -360 and +360)
+extern  cvar_t  *sv_skeetfansize;		// spread of the skeet launcher (defaults to 144, range 0-360)
+#endif
 
 //===========================================================
 
@@ -344,6 +410,36 @@ void SV_MasterShutdown (void);
 int SV_RateMsec(client_t *client);
 
 
+//
+// sv_utils.c
+//
+int   SV_FindConfigstringIndex(char *name, int start, int max, qboolean create);
+void  QDECL SV_LogPrintf(const char *fmt, ...) __attribute__ ((format (printf, 1, 2)));
+void  SV_SendScoreboardSingleMessageToAllClients(client_t *cl, playerState_t *ps);
+void  SV_SendSoundToClient(client_t *cl, char *name);
+int   SV_UnitsToMeters(float distance);
+int   SV_XORShiftRand(void);
+float SV_XORShiftRandRange(float min, float max);
+void  SV_XORShiftRandSeed(unsigned int seed);
+
+
+//
+// sv_skeetshoot.c
+//
+#ifdef USE_SKEETMOD
+void     SV_SkeetInit(void);
+void     SV_SkeetThink(void);
+void     SV_SkeetLaunch(svEntity_t *sEnt, sharedEntity_t *gEnt);
+void     SV_SkeetReset(svEntity_t *sEnt, sharedEntity_t *gEnt);
+void     SV_SkeetRespawn(svEntity_t *sEnt, sharedEntity_t *gEnt);
+void     SV_SkeetParseGameRconCommand(const char *text);
+void     SV_SkeetParseGameServerCommand(int clientNum, const char *text);
+void     SV_SkeetBackupPowerups(client_t *cl);
+void     SV_SkeetRestorePowerups(client_t *cl);
+void     SV_SkeetScore(client_t *cl, playerState_t *ps, trace_t *tr);
+void     SV_SkeetClientEvents(client_t *cl);
+qboolean SV_SkeetShoot(client_t *cl, playerState_t *ps);
+#endif
 
 //
 // sv_init.c
@@ -367,10 +463,6 @@ void SV_GetChallenge(netadr_t from);
 
 void SV_DirectConnect( netadr_t from );
 
-#ifndef STANDALONE
-void SV_AuthorizeIpPacket( netadr_t from );
-#endif
-
 void SV_ExecuteClientMessage( client_t *cl, msg_t *msg );
 void SV_UserinfoChanged( client_t *cl );
 
@@ -378,18 +470,23 @@ void SV_ClientEnterWorld( client_t *client, usercmd_t *cmd );
 void SV_FreeClient(client_t *client);
 void SV_DropClient( client_t *drop, const char *reason );
 
+#ifdef USE_AUTH
+void SV_Auth_DropClient(client_t *drop, const char *reason, const char *message);
+#endif
+
 void SV_ExecuteClientCommand( client_t *cl, const char *s, qboolean clientOK );
 void SV_ClientThink (client_t *cl, usercmd_t *cmd);
 
-int SV_WriteDownloadToClient(client_t *cl , msg_t *msg);
-int SV_SendDownloadMessages(void);
 int SV_SendQueuedMessages(void);
+void SV_UpdateUserinfo_f( client_t *cl );
 
 
 //
 // sv_ccmds.c
 //
 void SV_Heartbeat_f( void );
+void SVD_WriteDemoFile(const client_t*, const msg_t*);
+void SV_StartRecordOne(client_t *client, char *filename);
 
 //
 // sv_snapshot.c
@@ -400,6 +497,7 @@ void SV_WriteFrameToClient (client_t *client, msg_t *msg);
 void SV_SendMessageToClient( msg_t *msg, client_t *client );
 void SV_SendClientMessages( void );
 void SV_SendClientSnapshot( client_t *client );
+void SV_CheckClientUserinfoTimer( void );
 
 //
 // sv_game.c

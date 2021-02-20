@@ -199,21 +199,19 @@ typedef struct {
 	char		downloadTempName[MAX_OSPATH];
 	char		downloadName[MAX_OSPATH];
 #ifdef USE_CURL
+	qboolean	dlquerying; // if true, we're expecting the user to respond to the download prompt
 	qboolean	cURLEnabled;
-	qboolean	cURLUsed;
 	qboolean	cURLDisconnected;
 	char		downloadURL[MAX_OSPATH];
 	CURL		*downloadCURL;
 	CURLM		*downloadCURLM;
-#endif /* USE_CURL */
-	int		sv_allowDownload;
 	char		sv_dlURL[MAX_CVAR_VALUE_STRING];
-	int			downloadNumber;
-	int			downloadBlock;	// block we are waiting for
-	int			downloadCount;	// how many bytes we got
-	int			downloadSize;	// how many bytes we got
+	int			downloadCount;	// how many bytes we got so far
+	int			downloadSize;	// how many bytes there are total
+	char		mapname[MAX_CVAR_VALUE_STRING];
 	char		downloadList[MAX_INFO_STRING]; // list of paks we need to download
 	qboolean	downloadRestart;	// if true, we need to do another FS_Restart because we downloaded a pak
+#endif /* USE_CURL */
 
 	// demo information
 	char		demoName[MAX_QPATH];
@@ -297,15 +295,44 @@ typedef struct {
 	int			netType;
 	int			gameType;
 	int		  	clients;
+	int         bots;
 	int		  	maxClients;
 	int			minPing;
 	int			maxPing;
 	int			ping;
 	qboolean	visible;
 	int			punkbuster;
+	int			auth; //@Barbatos: auth system
+	int			password; //@Barbatos: passworded server?
+	char 		modversion[MAX_NAME_LENGTH]; //@Barbatos - g_modversion
 	int			g_humanplayers;
 	int			g_needpass;
 } serverInfo_t;
+
+typedef	struct {
+	struct {
+		netadrtype_t	type;
+		byte			ip[4];
+		unsigned short	port;
+	} adr;
+
+	char		hostName[MAX_NAME_LENGTH];
+	char		mapName[MAX_NAME_LENGTH];
+	char		game[MAX_NAME_LENGTH];
+	int			netType;
+	int			gameType;
+	int			clients;
+	int			bots;
+	int			maxClients;
+	int			minPing;
+	int			maxPing;
+	int			ping;
+	qboolean	visible;
+	int			punkbuster;
+	int			auth; //@Barbatos: auth system
+	int			password; //@Barbatos: passworded server?
+	char		modversion[MAX_NAME_LENGTH]; //@Barbatos - g_modversion
+} legacyServerInfo_t;
 
 typedef struct {
 	qboolean	cddialog;			// bring up the cd needed dialog next frame
@@ -338,11 +365,7 @@ typedef struct {
 	int pingUpdateSource;		// source currently pinging or updating
 
 	// update server info
-	netadr_t	updateServer;
-	char		updateChallenge[MAX_TOKEN_CHARS];
 	char		updateInfoString[MAX_INFO_STRING];
-
-	netadr_t	authorizeServer;
 
 	netadr_t	rconAddress;
 
@@ -351,12 +374,22 @@ typedef struct {
 	qhandle_t	charSetShader;
 	qhandle_t	whiteShader;
 	qhandle_t	consoleShader;
+
+	fontInfo_t  font;
+	qboolean    fontFont;
 } clientStatic_t;
 
 extern	clientStatic_t		cls;
 
 extern	char		cl_oldGame[MAX_QPATH];
 extern	qboolean	cl_oldGameSet;
+
+typedef enum {
+	ITEM_TEXTSTYLE_NORMAL,
+	ITEM_TEXTSTYLE_SHADOWED,
+	ITEM_TEXTSTYLE_SHADOWEDLESS
+} textStyle_t;
+
 
 //=============================================================================
 
@@ -416,7 +449,7 @@ extern	cvar_t	*cl_aviMotionJpeg;
 
 extern	cvar_t	*cl_activeAction;
 
-extern	cvar_t	*cl_allowDownload;
+extern	cvar_t	*cl_autodownload;
 extern  cvar_t  *cl_downloadMethod;
 extern	cvar_t	*cl_conXOffset;
 extern	cvar_t	*cl_inGameVideo;
@@ -425,6 +458,16 @@ extern	cvar_t	*cl_lanForcePackets;
 extern	cvar_t	*cl_autoRecordDemo;
 
 extern	cvar_t	*cl_consoleKeys;
+extern	cvar_t	*cl_consoleUseScanCode;
+
+extern	cvar_t	*cl_masterServers[MAX_MASTER_SERVERS];
+
+#ifdef USE_AUTH
+extern  cvar_t	*cl_auth_engine;
+extern  cvar_t  *cl_auth;
+extern  cvar_t  *authc;
+extern  cvar_t  *authl; // Auth Login
+#endif
 
 #ifdef USE_MUMBLE
 extern	cvar_t	*cl_useMumble;
@@ -464,7 +507,6 @@ void CL_AddReliableCommand(const char *cmd, qboolean isDisconnectCmd);
 void CL_StartHunkUsers( qboolean rendererOnly );
 
 void CL_Disconnect_f (void);
-void CL_GetChallengePacket (void);
 void CL_Vid_Restart_f( void );
 void CL_Snd_Restart_f (void);
 void CL_StartDemoLoop( void );
@@ -473,7 +515,11 @@ void CL_ReadDemoMessage( void );
 void CL_StopRecord_f(void);
 
 void CL_InitDownloads(void);
+
+#ifdef USE_CURL
 void CL_NextDownload(void);
+void CL_DownloadMenu(int key);
+#endif
 
 void CL_GetPing( int n, char *buf, int buflen, int *pingtime );
 void CL_GetPingInfo( int n, char *buf, int buflen );
@@ -482,7 +528,6 @@ int CL_GetPingQueueCount( void );
 
 void CL_ShutdownRef( void );
 void CL_InitRef( void );
-qboolean CL_CDKeyValidate( const char *key, const char *checksum );
 int CL_ServerStatus( char *serverAddress, char *serverStatusString, int maxLen );
 
 qboolean CL_CheckPaused(void);
@@ -541,9 +586,8 @@ qboolean CL_UpdateVisiblePings_f( int source );
 //
 void Con_DrawCharacter (int cx, int line, int num);
 
-void Con_CheckResize (void);
-void Con_Init(void);
-void Con_Shutdown(void);
+void Con_Init (void);
+void Con_Shutdown (void);
 void Con_Clear_f (void);
 void Con_ToggleConsole_f (void);
 void Con_DrawNotify (void);
@@ -555,6 +599,9 @@ void Con_PageDown( void );
 void Con_Top( void );
 void Con_Bottom( void );
 void Con_Close( void );
+
+void Con_NextTab(void);
+void Con_PrevTab(void);
 
 void CL_LoadConsoleHistory( void );
 void CL_SaveConsoleHistory( void );
@@ -597,6 +644,9 @@ void CIN_SetExtents (int handle, int x, int y, int w, int h);
 void CIN_SetLooping (int handle, qboolean loop);
 void CIN_UploadCinematic(int handle);
 void CIN_CloseAllVideos(void);
+
+int     SCR_FontWidth(const char *text, float scale);
+void    SCR_DrawFontText(float x, float y, float scale, vec4_t color, const char *text, int style);
 
 //
 // cl_cgame.c

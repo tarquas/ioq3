@@ -388,6 +388,191 @@ static void SV_TouchFile( const char *filename ) {
 
 /*
 ================
+TextEncode6Bit
+
+Encodes text using 6 bit alphabet for map names
+================
+*/
+
+int TextEncode6Bit(const char *nam, unsigned char *buf, int blen)
+{
+	static int char2val[256] = { // character mapping table
+			0,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+			1,2,-1,3,-1,4,5,6,7,8,-1,9,10,11,12,-1,13,14,15,16,17,18,19,20,21,22,-1,23,-1,24,-1,-1,25,-1,-1,
+			-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,26,-1,27,28,29,30,31,32,
+			33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,-1,58,59,-1,-1,-1,-1,
+			-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+			-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+			-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+			-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
+	};
+	int ol;
+	static char tmp[BIG_INFO_STRING * 4];
+	char *tp = tmp+1;
+
+	tmp[0]=' '; // add space at start to compress first name using " ut4_"
+	while(*nam)  *(tp++) = tolower(*(nam++));
+
+	tp = tmp;
+	ol = 0;
+	while(1) { // Use 4 values for most common words (based on analysis of 5000+ map filenames)
+		int x;
+		char ch = *tp;
+		if (ch==' ' && tp[1]=='u' && tp[2]=='t' && tp[3]=='4' && tp[4]=='_') { // " ut4_"
+			x = 60; tp+=5;
+		} else
+		if (ch==' ' && tp[1]=='u' && tp[2]=='t' && tp[3]=='_') { // " ut_"
+			x = 61; tp+=4;
+		} else
+		if (ch=='_' && tp[1]=='b' && tp[2]=='e' && tp[3]=='t' && tp[4]=='a') { //"_beta"
+			x = 62; tp+=5;
+		} else
+		if (ch=='j' && tp[1]=='u' && tp[2]=='m' && tp[3]=='p' && tp[4]=='s') { //"jumps"
+			x = 63; tp+=5;
+		} else {
+			x = char2val[(unsigned int)ch];
+			tp++;
+		}
+		if (x == -1) {
+			Com_Printf("Invalid character in pk3 file name: '%c'\n",ch);
+			x = char2val['~']; // replace with ~ character to not break everythign else
+		}
+		buf[ol++] = x;
+		if (ol == blen) {
+			Com_Printf("TextEncode6Bit: target buffer overflow!\n");
+			buf[ol - 1] = 0;
+			return ol;
+		}
+		if (!ch)
+			return ol;
+	}
+}
+
+/*
+================
+SV_MakeCompressedPureList
+
+Fills the last N configstrings with compressed pure list
+================
+*/
+void SV_MakeCompressedPureList(void) {
+
+	unsigned char buf[PURE_COMPRESS_BUFFER];
+	char tmp[1025];
+	int i, l, bl, sh, shl, ol, csnr;
+	const char *nam;
+	msg_t msg = {qfalse};
+	const char *err_chunk = "Too many pk3 files (compressed data doesn't fit into available space)";
+
+	// Get raw checksums
+	bl = FS_LoadedPakChecksumsBlob(buf+2,sizeof(buf)-2);
+	if (!bl) Com_Error(ERR_DROP,"Too many pk3 files (size checksums > buffer)");
+	// Com_Printf("CRC SIZE(%d)\n",bl);
+
+	// Add number of files at start
+	l = bl / 4; // num files
+	buf[0] = (l) & 0xFF;
+	buf[1] = (l >> 8) & 0xFF;
+
+	// Get pak names
+	nam = FS_LoadedPakNames();
+#if 1
+	msg.cursize = 2+bl;
+	msg.cursize += TextEncode6Bit(nam,buf + msg.cursize, sizeof(buf) - msg.cursize);
+#else
+	msg.cursize = 2+bl+strlen(nam)+1;
+ if (msg.cursize>sizeof(buf)) Com_Error(ERR_DROP,"Too many pk3 files (no space in buffer for names, need %d bytes)",msg.cursize-sizeof(buf));
+ strcpy((char*)buf+2+bl,nam);
+#endif
+	Com_Printf("Pure filelist (%d files) size: %d\n",l,msg.cursize);
+
+	// fprintf(stderr,"FNAMES: %s\n",nam);
+	// Com_Printf("BUF(%d): ",msg.cursize);
+	// for(i=0;i<msg.cursize;i++) Com_Printf("%02X",buf[i]);
+	// Com_Printf("\n");
+
+	// Huffman compress names
+	msg.maxsize = sizeof(buf);
+	msg.data = buf;
+	Huff_Compress(&msg,2+bl);
+	bl = msg.cursize;
+
+	// fprintf(stderr,"COMPRESSED(%d): ",msg.cursize);
+	// for(i=0;i<msg.cursize;i++) fprintf(stderr,"%02X",buf[i]);
+	// fprintf(stderr,"\n");
+
+	Com_Printf("Pure filelist compressed size: %d\n",bl);
+
+	// Do 8bit to 7bit encoding, escaping \0 % " using @ char and original value + 1
+	csnr = 0;
+	sh = 0;
+	shl = 0;
+	ol = 0;
+	for(i = 0; i < bl; i++) {
+		sh = (sh << 8)|buf[i];
+		shl += 8;
+		//Com_Printf("IN:%02X\n",buf[i]);
+		while(shl >= 7) {
+			shl -= 7;
+			int v = (sh >> shl) & 127;
+			if (v == 0 || v=='"' || v=='%' || v=='@') {
+				tmp[ol++] = '@';
+				//Com_Printf("OUT:%02X\n",tmp[ol-1]);
+				if (ol == sizeof(tmp)-1) {
+					tmp[ol] = 0;
+					if (csnr == PURE_COMPRESS_NUMCS)
+						Com_Error(ERR_DROP, "%s", err_chunk);
+					SV_SetConfigstring(MAX_CONFIGSTRINGS - PURE_COMPRESS_NUMCS + csnr, tmp);
+					csnr++;
+					ol = 0;
+				}
+				tmp[ol++] = v + 1;
+			} else {
+				tmp[ol++] = v;
+			}
+			//Com_Printf("OUT:%02X\n",tmp[ol-1]);
+			if (ol == sizeof(tmp) - 1) {
+				tmp[ol] = 0;
+				if (csnr == PURE_COMPRESS_NUMCS)
+					Com_Error(ERR_DROP, "%s", err_chunk);
+				SV_SetConfigstring( MAX_CONFIGSTRINGS-PURE_COMPRESS_NUMCS+csnr, tmp);
+				csnr++;
+				ol=0;
+			}
+		}
+	}
+	// Com_Printf("[shl=%d sh=%X]\n",shl,sh);
+
+	// Finish remaining bits if any
+	if (shl > 0) {
+		int v = (sh << (7 - shl)) & 127;
+		if (v == 0 || v == '"' || v == '%' || v == '@') {
+			tmp[ol++] = '@';
+			if (ol == sizeof(tmp)-1) {
+				tmp[ol] = 0;
+				if (csnr == PURE_COMPRESS_NUMCS)
+					Com_Error(ERR_DROP, "%s", err_chunk);
+				SV_SetConfigstring(MAX_CONFIGSTRINGS - PURE_COMPRESS_NUMCS + csnr, tmp);
+				csnr++;
+				ol = 0;
+			}
+			tmp[ol++] = v+1;
+		} else {
+			tmp[ol++] = v;
+		}
+		//Com_Printf("OUT:%02X\n",tmp[ol-1]);
+	}
+	if (ol) {
+		if (csnr == PURE_COMPRESS_NUMCS)
+			Com_Error(ERR_DROP, "%s", err_chunk);
+		tmp[ol] = 0;
+		SV_SetConfigstring(MAX_CONFIGSTRINGS - PURE_COMPRESS_NUMCS + csnr, tmp);
+	}
+	Com_Printf("Using %d configstrings to store pure filelist (encoded using %d characters)\n", csnr + 1, ol + csnr * 1024);
+}
+
+/*
+================
 SV_SpawnServer
 
 Change the server to a new map, taking all connected
@@ -407,6 +592,12 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 
 	Com_Printf ("------ Server Initialization ------\n");
 	Com_Printf ("Server: %s\n",server);
+
+#ifndef DEDICATED
+	// clear pure status when loading the server since the map we're loading might not be on the
+	// pure list and would fail to load
+	FS_PureServerSetLoadedPaks("", "");
+#endif
 
 	// if not running a dedicated server CL_MapLoading will connect the client to the server
 	// also print some status stuff
@@ -465,6 +656,7 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 
 	// get a new checksum feed and restart the file system
 	sv.checksumFeed = ( ((unsigned int)rand() << 16) ^ (unsigned int)rand() ) ^ Com_Milliseconds();
+	FS_SetMapName(server);
 	FS_Restart( sv.checksumFeed );
 
 	CM_LoadMap( va("maps/%s.bsp", server), qfalse, &checksum );
@@ -505,6 +697,10 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 
 	// create a baseline for more efficient communications
 	SV_CreateBaseline ();
+	
+	// stop server-side demo (if any)
+	if (com_dedicated->integer)
+		Cbuf_ExecuteText(EXEC_NOW, "stopserverdemo all");
 
 	for (i=0 ; i<sv_maxclients->integer ; i++) {
 		// send the new gamestate to all connected clients
@@ -560,21 +756,35 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	svs.time += 100;
 
 	if ( sv_pure->integer ) {
-		// the server sends these to the clients so they will only
-		// load pk3s also loaded at the server
-		p = FS_LoadedPakChecksums();
-		Cvar_Set( "sv_paks", p );
-		if (strlen(p) == 0) {
-			Com_Printf( "WARNING: sv_pure set but no PK3 files loaded\n" );
-		}
-		p = FS_LoadedPakNames();
-		Cvar_Set( "sv_pakNames", p );
-
 		// we need to touch the cgame and ui qvm because they could be in
 		// separate pk3 files and the client will need to download the pk3
 		// files with the latest cgame and ui qvm to pass the pure check
 		SV_TouchFile( "vm/cgame.qvm" );
 		SV_TouchFile( "vm/ui.qvm" );
+
+		// Update latched value
+		Cvar_Get ("sv_extraPaks", "", CVAR_ARCHIVE | CVAR_LATCH);
+		Cvar_Get ("sv_extraPure", "0", CVAR_ARCHIVE | CVAR_LATCH);
+
+		if ( sv_extraPure->integer ) {
+			FS_SetExtraPure(server, sv_extraPaks->string);
+		}
+
+		// the server sends these to the clients so they will only
+		// load pk3s also loaded at the server
+		if (sv_newpurelist->integer) {
+			Cvar_Set( "sv_paks", "*" );
+			Cvar_Set( "sv_pakNames", "*" );
+			SV_MakeCompressedPureList();
+		} else {
+			p = FS_LoadedPakChecksums();
+			Cvar_Set( "sv_paks", p );
+			if (!p[0]) {
+				Com_Printf( "WARNING: sv_pure set but no PK3 files loaded\n" );
+			}
+			p = FS_LoadedPakNames();
+			Cvar_Set( "sv_pakNames", p );
+		}
 	}
 	else {
 		Cvar_Set( "sv_paks", "" );
@@ -589,6 +799,29 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 
 	// save systeminfo and serverinfo strings
 	Q_strncpyz( systemInfo, Cvar_InfoString_Big( CVAR_SYSTEMINFO ), sizeof( systemInfo ) );
+
+	{
+		const char *t,*tt;
+		int l,l2;
+
+		t = Info_ValueForKey( systemInfo, "sv_paks" );
+		l = 0;
+		if (t) {
+			tt = t;
+			while(*tt) { if (*tt==' ') l++; tt++; }
+		}
+
+		t = Info_ValueForKey( systemInfo, "sv_pakNames" );
+		l2 = 0;
+		if (t) {
+			tt = t;
+			while(*tt) { if (*tt==' ') l2++; tt++; }
+		}
+		if (l != l2) {
+			Com_Printf( "WARNING: Pure pak file list inconsistency (%d checksums, %d file names)\n",l,l2 );
+		}
+	}
+
 	cvar_modifiedFlags &= ~CVAR_SYSTEMINFO;
 	SV_SetConfigstring( CS_SYSTEMINFO, systemInfo );
 
@@ -599,6 +832,10 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	// and any configstring changes should be reliably transmitted
 	// to all clients
 	sv.state = SS_GAME;
+
+#ifdef USE_SKEETMOD
+	SV_SkeetInit();
+#endif
 
 	// send a heartbeat now so the master will get up to date info
 	SV_Heartbeat_f();
@@ -630,7 +867,7 @@ void SV_Init (void)
 	SV_AddOperatorCommands ();
 
 	// serverinfo vars
-	Cvar_Get ("dmflags", "0", CVAR_SERVERINFO);
+	Cvar_Get ("dmflags", "0", CVAR_ARCHIVE);
 	Cvar_Get ("fraglimit", "20", CVAR_SERVERINFO);
 	Cvar_Get ("timelimit", "0", CVAR_SERVERINFO);
 	sv_gametype = Cvar_Get ("g_gametype", "0", CVAR_SERVERINFO | CVAR_LATCH );
@@ -642,13 +879,13 @@ void SV_Init (void)
 
 	sv_minRate = Cvar_Get ("sv_minRate", "0", CVAR_ARCHIVE | CVAR_SERVERINFO );
 	sv_maxRate = Cvar_Get ("sv_maxRate", "0", CVAR_ARCHIVE | CVAR_SERVERINFO );
-	sv_dlRate = Cvar_Get("sv_dlRate", "100", CVAR_ARCHIVE | CVAR_SERVERINFO);
 	sv_minPing = Cvar_Get ("sv_minPing", "0", CVAR_ARCHIVE | CVAR_SERVERINFO );
 	sv_maxPing = Cvar_Get ("sv_maxPing", "0", CVAR_ARCHIVE | CVAR_SERVERINFO );
-	sv_floodProtect = Cvar_Get ("sv_floodProtect", "1", CVAR_ARCHIVE | CVAR_SERVERINFO );
+	sv_floodProtect = Cvar_Get ("sv_floodProtect", "2", CVAR_ARCHIVE | CVAR_SERVERINFO );
+	sv_clientsPerIp = Cvar_Get ("sv_clientsPerIp", "3", CVAR_ARCHIVE | CVAR_SERVERINFO );
+	sv_newpurelist = Cvar_Get ("sv_newpurelist", "0", CVAR_ARCHIVE );
 
 	// systeminfo
-	Cvar_Get ("sv_cheats", "1", CVAR_SYSTEMINFO | CVAR_ROM );
 	sv_serverid = Cvar_Get ("sv_serverid", "0", CVAR_SYSTEMINFO | CVAR_ROM );
 	sv_pure = Cvar_Get ("sv_pure", "1", CVAR_SYSTEMINFO );
 #ifdef USE_VOIP
@@ -668,8 +905,8 @@ void SV_Init (void)
 	sv_timeout = Cvar_Get ("sv_timeout", "200", CVAR_TEMP );
 	sv_zombietime = Cvar_Get ("sv_zombietime", "2", CVAR_TEMP );
 	Cvar_Get ("nextmap", "", CVAR_TEMP );
+	Cvar_Get ("sv_cheatMode", "0", CVAR_TEMP );
 
-	sv_allowDownload = Cvar_Get ("sv_allowDownload", "0", CVAR_SERVERINFO);
 	Cvar_Get ("sv_dlURL", "", CVAR_SERVERINFO | CVAR_ARCHIVE);
 	
 	sv_master[0] = Cvar_Get("sv_master1", MASTER_SERVER_NAME, 0);
@@ -683,10 +920,33 @@ void SV_Init (void)
 	sv_killserver = Cvar_Get ("sv_killserver", "0", 0);
 	sv_mapChecksum = Cvar_Get ("sv_mapChecksum", "", CVAR_ROM);
 	sv_lanForceRate = Cvar_Get ("sv_lanForceRate", "1", CVAR_ARCHIVE );
-#ifndef STANDALONE
-	sv_strictAuth = Cvar_Get ("sv_strictAuth", "1", CVAR_ARCHIVE );
-#endif
 	sv_banFile = Cvar_Get("sv_banFile", "serverbans.dat", CVAR_ARCHIVE);
+
+	sv_demonotice = Cvar_Get ("sv_demonotice", "Smile! You're on camera!", CVAR_ARCHIVE);
+	sv_demofolder = Cvar_Get ("sv_demofolder", "serverdemos", CVAR_ARCHIVE );
+	sv_autoRecordDemo = Cvar_Get ("sv_autoRecordDemo", "0", CVAR_ARCHIVE );
+
+	sv_sayprefix = Cvar_Get ("sv_sayprefix", "console: ", CVAR_ARCHIVE );
+	sv_tellprefix = Cvar_Get ("sv_tellprefix", "console_tell: ", CVAR_ARCHIVE );
+	sv_extraPaks = Cvar_Get ("sv_extraPaks", "", CVAR_ARCHIVE | CVAR_LATCH);
+	sv_extraPure = Cvar_Get ("sv_extraPure", "0", CVAR_ARCHIVE | CVAR_LATCH);
+
+#ifdef USE_AUTH
+	sv_authServerIP = Cvar_Get("sv_authServerIP", "", CVAR_TEMP | CVAR_ROM);
+	sv_auth_engine = Cvar_Get("sv_auth_engine", "1", CVAR_ROM);
+#endif
+
+#ifdef USE_SKEETMOD
+	sv_skeetshoot = Cvar_Get("sv_skeetshoot", "0", CVAR_ARCHIVE);
+	sv_skeethitreport = Cvar_Get("sv_skeethitreport", "0", CVAR_ARCHIVE);
+	sv_skeethitsound = Cvar_Get("sv_skeethitsound", "sound/skeetshoot/skeethitsound.wav", CVAR_ARCHIVE);
+	sv_skeetpoints = Cvar_Get("sv_skeetpoints", "0", CVAR_ARCHIVE);
+	sv_skeetpointsnotify = Cvar_Get("sv_skeetpointsnotify", "0", CVAR_ARCHIVE);
+	sv_skeetprotect = Cvar_Get("sv_skeetprotect", "1", CVAR_ARCHIVE);
+	sv_skeetspeed = Cvar_Get("sv_skeetspeed", "2800", CVAR_ARCHIVE);
+	sv_skeetrotate = Cvar_Get("sv_skeetrotate", "0", CVAR_ARCHIVE);
+	sv_skeetfansize = Cvar_Get("sv_skeetfansize", "144", CVAR_ARCHIVE);
+#endif
 
 	// initialize bot cvars so they are listed and can be set before loading the botlib
 	SV_BotInitCvars();
@@ -748,6 +1008,10 @@ void SV_Shutdown( char *finalmsg ) {
 
 	NET_LeaveMulticast6();
 
+	// stop server-side demos (if any)
+	if (com_dedicated->integer)
+		Cbuf_ExecuteText(EXEC_NOW, "stopserverdemo all");
+	
 	if ( svs.clients && !com_errorEntered ) {
 		SV_FinalMessage( finalmsg );
 	}

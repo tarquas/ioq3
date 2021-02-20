@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "../qcommon/qcommon.h"
 #include "sys_local.h"
 #include "windows.h"
+#include "io.h"
 
 #define QCONSOLE_HISTORY 32
 
@@ -46,8 +47,8 @@ static int qconsole_linelen = 0;
 static qboolean qconsole_drawinput = qtrue;
 static int qconsole_cursor;
 
-static HANDLE qconsole_hout;
-static HANDLE qconsole_hin;
+static HANDLE qconsole_hout = INVALID_HANDLE_VALUE;
+static HANDLE qconsole_hin = INVALID_HANDLE_VALUE;
 
 /*
 ==================
@@ -272,6 +273,9 @@ CON_Shutdown
 */
 void CON_Shutdown( void )
 {
+	if( qconsole_hin == INVALID_HANDLE_VALUE )
+		return;
+
 	CON_Hide( );
 	SetConsoleMode( qconsole_hin, qconsole_orig_mode );
 	SetConsoleCursorInfo( qconsole_hout, &qconsole_orig_cursorinfo );
@@ -289,6 +293,21 @@ void CON_Init( void )
 {
 	CONSOLE_SCREEN_BUFFER_INFO info;
 	int i;
+
+	if ((_fileno(stdin) >= 0 && !_isatty(_fileno(stdin))) ||
+		(_fileno(stdout) >= 0 && !_isatty(_fileno(stdout))) ||
+		(_fileno(stderr) >= 0 && !_isatty(_fileno(stderr)))) {
+		// Fallback to passive mode if any standard file descriptor was redirected
+		return;
+	}
+
+	// Attach to parent console if we haven't got one already
+	if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+		// Connect stdin/out/err to the attached console
+		freopen("CONIN$", "r", stdin);
+		freopen("CONOUT$", "w", stdout);
+		freopen("CONOUT$", "w", stderr);
+	}
 
 	// handle Ctrl-C or other console termination
 	SetConsoleCtrlHandler( CON_CtrlHandler, TRUE );
@@ -335,6 +354,9 @@ char *CON_Input( void )
 	WORD key = 0;
 	int i;
 	int newlinepos = -1;
+
+	if( qconsole_hin == INVALID_HANDLE_VALUE )
+		return NULL;
 
 	if( !GetNumberOfConsoleInputEvents( qconsole_hin, &events ) )
 		return NULL;
@@ -487,7 +509,7 @@ CON_WindowsColorPrint
 Set text colors based on Q3 color codes
 =================
 */
-void CON_WindowsColorPrint( const char *msg )
+static void CON_WindowsColorPrint( const char *msg )
 {
 	static char buffer[ MAXPRINTMSG ];
 	int         length = 0;
@@ -546,9 +568,16 @@ CON_Print
 */
 void CON_Print( const char *msg )
 {
-	CON_Hide( );
+	if( qconsole_hin == INVALID_HANDLE_VALUE ) {
+		if( com_ansiColor && com_ansiColor->integer )
+			Sys_AnsiColorPrint( msg );
+		else
+			fputs( msg, stderr );
+	} else {
+		CON_Hide( );
 
-	CON_WindowsColorPrint( msg );
+		CON_WindowsColorPrint( msg );
 
-	CON_Show( );
+		CON_Show( );
+	}
 }

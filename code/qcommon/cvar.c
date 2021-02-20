@@ -589,7 +589,7 @@ cvar_t *Cvar_Set2( const char *var_name, const char *value, qboolean force ) {
 					return var;
 			}
 
-			Com_Printf ("%s will be changed upon restarting.\n", var_name);
+			Com_Printf ("%s will be changed upon reloading.\n", var_name);
 			var->latchedString = CopyString(value);
 			var->modified = qtrue;
 			var->modificationCount++;
@@ -870,6 +870,12 @@ void Cvar_Set_f( void ) {
 	if( !v ) {
 		return;
 	}
+
+	// Don't change flags on read only vars
+	if (v->flags & (CVAR_ROM | CVAR_INIT)) {
+		return;
+	}
+
 	switch( cmd[3] ) {
 		case 'a':
 			if( !( v->flags & CVAR_ARCHIVE ) ) {
@@ -1412,6 +1418,57 @@ void	Cvar_Update( vmCvar_t *vmCvar ) {
 }
 
 /*
+=====================
+Cvar_Search_f
+
+Search for a Cvar given it's partial name
+=====================
+*/
+void Cvar_Search_f(void)  {
+
+	int    i, j;
+	int    num = 0;
+	int    len = 0;
+	int    maxlen = 0;
+	char   *src;
+	cvar_t *var;
+	cvar_t *matches[MAX_CVARS];
+
+	if (Cmd_Argc() != 2) {
+		Com_Printf("Usage: cvarsearch <variable>\n");
+		return;
+	}
+
+	src = Cmd_Argv(1);
+	for (var = cvar_vars; var && num < MAX_CVARS; var = var->next) {
+		if (Q_stristr(var->name, src)) {
+			len = (int) strlen(var->name);
+			maxlen = len > maxlen ? maxlen : len;
+			matches[num] = var;
+			num++;
+		}
+	}
+
+	if (!num) {
+		Com_Printf("No cvar found matching %s.\n", src);
+		return;
+	}
+
+	Com_Printf("Found %d cvars matching %s:\n", num, src);
+	for (i = 0; i < num; i++) {
+		var = matches[i];
+		Com_Printf(" - [%s]", var->name);
+		for (j = (int) strlen(var->name); j < maxlen; j++)
+			Com_Printf(" ");
+		Com_Printf(" '%s'", var->string);
+		if (Q_stricmp(var->string, var->resetString))
+			Com_Printf(", default='%s'", var->resetString);
+		Com_Printf("\n");
+	}
+
+}
+
+/*
 ==================
 Cvar_CompleteCvarName
 ==================
@@ -1459,6 +1516,7 @@ void Cvar_Init (void)
 	Cmd_SetCommandCompletionFunc("unset", Cvar_CompleteCvarName);
 
 	Cmd_AddCommand ("cvarlist", Cvar_List_f);
+	Cmd_AddCommand ("cvarsearch", Cvar_Search_f);
 	Cmd_AddCommand ("cvar_modified", Cvar_ListModified_f);
 	Cmd_AddCommand ("cvar_restart", Cvar_Restart_f);
 }

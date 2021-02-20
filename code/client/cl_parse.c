@@ -224,7 +224,7 @@ void CL_ParseSnapshot( msg_t *msg ) {
 
 	// if we were just unpaused, we can only *now* really let the
 	// change come into effect or the client hangs.
-	cl_paused->modified = 0;
+	cl_paused->modified = qfalse;
 
 	newSnap.messageNum = clc.serverMessageSequence;
 
@@ -331,6 +331,189 @@ int cl_connectedToPureServer;
 int cl_connectedToCheatServer;
 
 /*
+================
+CL_TextDecode6Bit
+
+Decode pk3 file names encoded usign 6 bit alphabet
+================
+*/
+
+void CL_TextDecode6Bit(unsigned char *buf, int blen, char *out, int olen) {
+
+	static char val2char[] = "\x00 !#%&'()+,-.0123456789;=@[]^_`abcdefghijklmnopqrstuvwxyz{}~";
+	int i;
+	int op = -1; // encode added space at start
+
+	for(i=0;i<blen;i++) {
+		int v = buf[i];
+		if (v<60) {
+			v = val2char[v];
+			if (op>=0) out[op] = v;
+			op++;
+			if (!v) return; // null terminated, we are done
+		} else {
+			switch (v-60) {
+				case 0:
+					if (op+5>olen) {
+						buf[op]=0;
+						Com_Printf("CL_TextDecode6Bit: target buffer overflow!\n");
+						return;
+					}
+					if (op>=0) out[op+0] = ' ';
+					out[op+1] = 'u';
+					out[op+2] = 't';
+					out[op+3] = '4';
+					out[op+4] = '_';
+					op+=5;
+					break;
+				case 1:
+					if (op+4>olen) {
+						buf[op]=0;
+						Com_Printf("CL_TextDecode6Bit: target buffer overflow!\n");
+						return;
+					}
+					if (op>=0) out[op+0] = ' ';
+					out[op+1] = 'u';
+					out[op+2] = 't';
+					out[op+3] = '_';
+					op+=4;
+					break;
+				case 2:
+					if (op+5>olen) {
+						buf[op]=0;
+						Com_Printf("CL_TextDecode6Bit: target buffer overflow!\n");
+						return;
+					}
+					if (op>=0) out[op+0] = '_';
+					out[op+1] = 'b';
+					out[op+2] = 'e';
+					out[op+3] = 't';
+					out[op+4] = 'a';
+					op+=5;
+					break;
+				case 3:
+					if (op+5>olen) {
+						buf[op]=0;
+						Com_Printf("CL_TextDecode6Bit: target buffer overflow!\n");
+						return;
+					}
+					if (op>=0) out[op+0] = 'j';
+					out[op+1] = 'u';
+					out[op+2] = 'm';
+					out[op+3] = 'p';
+					out[op+4] = 's';
+					op+=5;
+					break;
+				default:
+					break;
+			}
+		}
+		if (op==olen) {
+			break;
+		}
+	}
+}
+
+
+/*
+================
+CL_ParseCompressedPureList
+
+Decode, decompress and set pure file list from compressed data
+================
+*/
+void CL_ParseCompressedPureList(void) {
+
+	int i, esc, sh, shc, bl, l;
+	static unsigned char buf[PURE_COMPRESS_BUFFER];
+	static char sums[16384];
+	static char names[BIG_INFO_STRING * 4];
+	msg_t msg = {qfalse};
+
+	// Decode 7 bit encoding into 8 bit buffer
+	esc = 0;
+	shc = 0;
+	sh = 0;
+	bl = 0;
+	for(i = 0;(i < 8) && (bl < sizeof(buf)); i++) {
+		char *s = cl.gameState.stringData + cl.gameState.stringOffsets[MAX_CONFIGSTRINGS - PURE_COMPRESS_NUMCS + i];
+		while (*s) {
+			int v = *(s++);
+			if (esc) {
+				v--;
+				esc = 0;
+			} else {
+				if (v == '@') {
+					esc = 1;
+					continue;
+				}
+			}
+			sh = (sh << 7) | v;
+			shc += 7;
+			if (shc >= 8) {
+				shc -= 8;
+				v = (sh >> shc) & 0xFF;
+				buf[bl++] = v;
+				//fprintf(stderr,"%02X",v);
+			}
+		}
+	}
+	//fprintf(stderr,"\n");
+
+	Com_Printf("Pure filelist compressed size: %d\n", bl);
+
+	// Decompress huffman encoded filenames
+	msg.maxsize = sizeof(buf);
+	msg.cursize = bl;
+	msg.data = buf;
+	l = (buf[0] | (buf[1] << 8)) * 4;
+	if (l > msg.maxsize)
+		Com_Error(ERR_DROP, "Malformed compressed pure filelist");
+	Huff_Decompress(&msg, 2 + l);
+
+	Com_Printf("Pure filelist (%d files) decompressed size: %d\n", l / 4, bl);
+
+	// fprintf(stderr,"DECOMPRESSED(%d): ",msg.cursize);
+	// for(i=0;i<msg.cursize;i++) fprintf(stderr,"%02X",buf[i]);
+	// fprintf(stderr,"\n");
+
+	// create checksums string
+	sums[0]=0;
+	sh=0;
+	for(i=0;i<l;i+=4) {
+		char tmp[16];
+		int n;
+		unsigned int chs = buf[2+i+0]|(buf[2+i+1]<<8)|(buf[2+i+2]<<16)|(buf[2+i+3]<<24);
+		n = sprintf(tmp,"%i ",chs); // Can't use Com_sprintf, it doesn't return anything
+		if (sh + n + 1 >= sizeof(sums)) {
+			Com_Error(ERR_DROP,"Checksum buffer overflow");
+			break;
+		}
+		strcpy(sums + sh, tmp);
+		sh+=n;
+		//Q_strcat( sums, sizeof( sums), va("%i ", chs ) ); // this is fugly
+	}
+	if (sh && sums[sh - 1]==' ') sums[sh - 1] = 0; // kill ending space
+
+	// unpack pk3 filenames
+	CL_TextDecode6Bit(buf + 2 + l, msg.cursize - (2 + l), names, sizeof(names));
+
+	// do simple integrity check, both should have same number of items
+	sh = 1; // number of spaces = number of names-1
+	i = 0;
+	while(names[i]) { if (names[i]==' ') sh++; i++; }
+	// fprintf(stderr,"FNAMES: %d  CHSUMS: %d\n",sh,l/4);
+
+	if (sh != l / 4)
+		Com_Printf("WARNING: Compressed purelist inconsistency!! (FN:%d/CH:%d)\n",sh,l/4);
+
+	// fprintf(stderr,"FNAMES: \"%s\"\n",names);
+	// fprintf(stderr,"CHSUMS: \"%s\"\n",sums);
+	FS_PureServerSetLoadedPaks( sums, names );
+
+}
+
+/*
 ==================
 CL_SystemInfoChanged
 
@@ -377,9 +560,15 @@ void CL_SystemInfoChanged( void ) {
 	}
 
 	// check pure server string
-	s = Info_ValueForKey( systemInfo, "sv_paks" );
-	t = Info_ValueForKey( systemInfo, "sv_pakNames" );
-	FS_PureServerSetLoadedPaks( s, t );
+	s = Info_ValueForKey(systemInfo, "sv_paks");
+	t = Info_ValueForKey(systemInfo, "sv_pakNames");
+	if (s[0] == '*' && s[1] == 0 && t[0] == '*' && t[1] == 0) {
+		Com_Printf("Using compressed pure file list\n");
+		CL_ParseCompressedPureList();
+	} else {
+		Com_Printf("Using default pure file list\n");
+		FS_PureServerSetLoadedPaks( s, t );
+	}
 
 	s = Info_ValueForKey( systemInfo, "sv_referencedPaks" );
 	t = Info_ValueForKey( systemInfo, "sv_referencedPakNames" );
@@ -415,14 +604,8 @@ void CL_SystemInfoChanged( void ) {
 			// If this cvar may not be modified by a server discard the value.
 			if(!(cvar_flags & (CVAR_SYSTEMINFO | CVAR_SERVER_CREATED | CVAR_USER_CREATED)))
 			{
-#ifndef STANDALONE
-				if(Q_stricmp(key, "g_synchronousClients") && Q_stricmp(key, "pmove_fixed") &&
-				   Q_stricmp(key, "pmove_msec"))
-#endif
-				{
-					Com_Printf(S_COLOR_YELLOW "WARNING: server is not allowed to set %s=%s\n", key, value);
-					continue;
-				}
+				Com_Printf(S_COLOR_YELLOW "WARNING: server is not allowed to set %s=%s\n", key, value);
+				continue;
 			}
 
 			Cvar_SetSafe(key, value);
@@ -443,15 +626,24 @@ CL_ParseServerInfo
 static void CL_ParseServerInfo(void)
 {
 	const char *serverInfo;
+	const char *mapname;
 
 	serverInfo = cl.gameState.stringData
 		+ cl.gameState.stringOffsets[ CS_SERVERINFO ];
 
-	clc.sv_allowDownload = atoi(Info_ValueForKey(serverInfo,
-		"sv_allowDownload"));
+	mapname = Info_ValueForKey(serverInfo, "mapname");
+
+#ifdef USE_CURL
 	Q_strncpyz(clc.sv_dlURL,
 		Info_ValueForKey(serverInfo, "sv_dlURL"),
 		sizeof(clc.sv_dlURL));
+
+	Q_strncpyz(clc.mapname,
+		mapname,
+		sizeof(clc.mapname));
+#endif
+
+	FS_SetMapName(mapname);
 }
 
 /*
@@ -544,6 +736,25 @@ void CL_ParseGamestate( msg_t *msg ) {
 
 	FS_ConditionalRestart(clc.checksumFeed, qfalse);
 
+	if (fs_dangerousPaksFound) {
+		char PakList[MAX_STRING_CHARS];
+		for (i = 0; i < fs_dangerousPaksFound; i++) {
+			Q_strcat(PakList, sizeof(PakList), va("%s.pk3, ", fs_dangerousPakNames[i]));
+		}
+
+		PakList[strlen(PakList) - 2] = 0;
+
+		Com_Error(ERR_DROP,
+			"^1WARNING! ^7Dangerous file(s) found in downloaded pk3%s:\n\n%s\n\n"
+			"You should go delete %s immediately. %s could lead to malicious code execution.",
+			fs_dangerousPaksFound == 1 ? "" : "s",
+			PakList,
+			fs_dangerousPaksFound == 1 ? "that file" : "those files",
+			fs_dangerousPaksFound == 1 ? "It" : "They");
+
+		return;
+	}
+
 	// This used to call CL_StartHunkUsers, but now we enter the download state before loading the
 	// cgame
 	CL_InitDownloads();
@@ -554,102 +765,6 @@ void CL_ParseGamestate( msg_t *msg ) {
 
 
 //=====================================================================
-
-/*
-=====================
-CL_ParseDownload
-
-A download message has been received from the server
-=====================
-*/
-void CL_ParseDownload ( msg_t *msg ) {
-	int		size;
-	unsigned char data[MAX_MSGLEN];
-	uint16_t block;
-
-	if (!*clc.downloadTempName) {
-		Com_Printf("Server sending download, but no download was requested\n");
-		CL_AddReliableCommand("stopdl", qfalse);
-		return;
-	}
-
-	// read the data
-	block = MSG_ReadShort ( msg );
-
-	if(!block && !clc.downloadBlock)
-	{
-		// block zero is special, contains file size
-		clc.downloadSize = MSG_ReadLong ( msg );
-
-		Cvar_SetValue( "cl_downloadSize", clc.downloadSize );
-
-		if (clc.downloadSize < 0)
-		{
-			Com_Error( ERR_DROP, "%s", MSG_ReadString( msg ) );
-			return;
-		}
-	}
-
-	size = MSG_ReadShort ( msg );
-	if (size < 0 || size > sizeof(data))
-	{
-		Com_Error(ERR_DROP, "CL_ParseDownload: Invalid size %d for download chunk", size);
-		return;
-	}
-	
-	MSG_ReadData(msg, data, size);
-
-	if((clc.downloadBlock & 0xFFFF) != block)
-	{
-		Com_DPrintf( "CL_ParseDownload: Expected block %d, got %d\n", (clc.downloadBlock & 0xFFFF), block);
-		return;
-	}
-
-	// open the file if not opened yet
-	if (!clc.download)
-	{
-		clc.download = FS_SV_FOpenFileWrite( clc.downloadTempName );
-
-		if (!clc.download) {
-			Com_Printf( "Could not create %s\n", clc.downloadTempName );
-			CL_AddReliableCommand("stopdl", qfalse);
-			CL_NextDownload();
-			return;
-		}
-	}
-
-	if (size)
-		FS_Write( data, size, clc.download );
-
-	CL_AddReliableCommand(va("nextdl %d", clc.downloadBlock), qfalse);
-	clc.downloadBlock++;
-
-	clc.downloadCount += size;
-
-	// So UI gets access to it
-	Cvar_SetValue( "cl_downloadCount", clc.downloadCount );
-
-	if (!size) { // A zero length block means EOF
-		if (clc.download) {
-			FS_FCloseFile( clc.download );
-			clc.download = 0;
-
-			// rename the file
-			FS_SV_Rename ( clc.downloadTempName, clc.downloadName, qfalse );
-		}
-
-		// send intentions now
-		// We need this because without it, we would hold the last nextdl and then start
-		// loading right away.  If we take a while to load, the server is happily trying
-		// to send us that last block over and over.
-		// Write it twice to help make sure we acknowledge the download
-		CL_WritePacket();
-		CL_WritePacket();
-
-		// get another file if needed
-		CL_NextDownload ();
-	}
-}
 
 #ifdef USE_VOIP
 static
@@ -914,7 +1029,7 @@ void CL_ParseServerMessage( msg_t *msg ) {
 			CL_ParseSnapshot( msg );
 			break;
 		case svc_download:
-			CL_ParseDownload( msg );
+			// We don't use support UDP downloads
 			break;
 		case svc_voipSpeex:
 #ifdef USE_VOIP

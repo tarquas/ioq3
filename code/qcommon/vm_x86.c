@@ -1377,7 +1377,7 @@ void VM_Compile(vm_t *vm, vmHeader_t *header)
 		case OP_STORE4:
 			EmitMovEAXStack(vm, 0);	
 			EmitString("8B 54 9F FC");			// mov edx, dword ptr -4[edi + ebx * 4]
-			MASK_REG("E2", vm->dataMask);		// and edx, 0x12345678
+			MASK_REG("E2", vm->dataMask);			// and edx, 0x12345678
 #if idx64
 			EmitRexString(0x41, "89 04 11");		// mov dword ptr [r9 + edx], eax
 #else
@@ -1389,7 +1389,7 @@ void VM_Compile(vm_t *vm, vmHeader_t *header)
 		case OP_STORE2:
 			EmitMovEAXStack(vm, 0);	
 			EmitString("8B 54 9F FC");			// mov edx, dword ptr -4[edi + ebx * 4]
-			MASK_REG("E2", vm->dataMask);		// and edx, 0x12345678
+			MASK_REG("E2", vm->dataMask);			// and edx, 0x12345678
 #if idx64
 			Emit1(0x66);					// mov word ptr [r9 + edx], eax
 			EmitRexString(0x41, "89 04 11");
