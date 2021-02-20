@@ -75,6 +75,23 @@ Sends a command string to a client
 ===============
 */
 void SV_GameSendServerCommand( int clientNum, const char *text ) {
+	char s[MAX_MSGLEN];
+	int n, r, b, c;
+
+	if (!memcmp(text, "scoresg ", 8)) {
+		sscanf(text + 8, "%d %d", &r, &b);
+		r += sv.redDelta; sv.redScore = r;
+		b += sv.blueDelta; sv.blueScore = b;
+		snprintf(s, MAX_MSGLEN, "scoresg %d %d", r, b);
+		text = s;
+	} else if (!memcmp(text, "scores ", 7)) {
+		sscanf(text + 7, "%d %d %d%n", &n, &r, &b, &c);
+		r += sv.redDelta; sv.redScore = r;
+		b += sv.blueDelta; sv.blueScore = b;
+		snprintf(s, MAX_MSGLEN, "scores %d %d %d%s", n, r, b, text + 7 + c);
+		text = s;
+	}
+
 	if ( clientNum == -1 ) {
 		SV_SendServerCommand( NULL, "%s", text );
 	} else {
@@ -276,7 +293,7 @@ void SV_LocateGameData( sharedEntity_t *gEnts, int numGEntities, int sizeofGEnti
 	sv.num_entities = numGEntities;
 
 	sv.gameClients = clients;
-	sv.gameClientSize = sizeofGameClient;
+	sv.gameClientSize = sizeofGameClient; // 6336 vs sizeof(playerState_t)=468
 }
 
 
@@ -301,6 +318,121 @@ static int	FloatAsInt( float f ) {
 	return fi.i;
 }
 
+static const unsigned int matchStartStages[] = {  // weapon masks
+	-1, // all - warmup
+	(1 << 1) + (1 << 16), // knife & bomb - round 1
+	(7 << 1) + (3 << 20) + (1 << 26) + (1 << 16), // knife & pistols & bomb - round 2
+	-1 // all - all next rounds
+};
+
+static int matchStartAnnounced = -1;
+
+static const char *matchStartStageNames[] = {
+	"Warmup",
+	"Knife",
+	"Pistol",
+	"All Weapons"
+};
+
+void SV_AdjustPlayerGear( client_t *cl ) {
+	int mode, i, w, p, period, m;
+	playerState_t *ps;
+
+	mode = sv_matchStart->integer;
+	if (!mode) return;
+
+	if (sv.matchReady && sv.matchReady != 7) {
+		period = 0;
+	} else {
+		period = sv.gameRound;
+
+		if (period) {
+			period += (svs.time - sv.gameRoundTime) / (sv_matchStartSec->integer * 1000);
+
+			switch (mode) {
+				case 1: period++; break;
+				case 2: period |= 1; break;
+			}
+
+			if (period > 3) period = 3;
+		}
+	}
+
+	m = matchStartStages[period];
+
+	if (period != matchStartAnnounced) {
+		matchStartAnnounced = period;
+		Com_Printf("MatchStart: %s\n", matchStartStageNames[period]);
+	}
+
+	if (m == -1) return;
+
+	ps = SV_GameClientNum(cl - svs.clients);
+
+	p = ps->weapon;
+
+	for (i = 0; i < MAX_POWERUPS; i++) {
+		w = ps->powerups[i] & 0x1F;
+
+		if (!(m & (1 << w))) {  // remove if not allowed
+			if (ps->weapon == i) p = -1;
+			ps->powerups[i] = w = 0;
+		}
+	}
+
+	if (p < 0) {
+		for (i = 0; i < MAX_POWERUPS; i++) {  // switch to pistol or knife
+			w = ps->powerups[i] & 0x1F;
+
+			if (w != 16 && w > p) {
+				p = w;
+				ps->weapon = i;
+			}
+		}
+	}
+}
+
+void SV_QVM_AdjustPlayerGear(char *slotStr) {
+	int slot;
+	sscanf(slotStr, "%d", &slot);
+	client_t *cl = &svs.clients[slot];
+	SV_AdjustPlayerGear(cl);
+}
+
+char* SV_QVM_HookOutput(char *s) {
+	if (!memcmp(s, "ClientUserinfoChanged: ", 23)) {
+		SV_QVM_AdjustPlayerGear(s + 23);
+	} else if (!memcmp(s, "ClientSpawn: ", 13)) {
+		SV_QVM_AdjustPlayerGear(s + 13);
+	} else if (!memcmp(s, "InitRound: ", 11)) {
+		sv.gameRound++;
+		sv.gameRoundTime = svs.time;
+	}
+
+	return s;
+}
+
+int SV_QVM_SetConfigstring(int id, char *value) {
+	// Com_Printf("<!!!> %d = %s\n", id, value);
+	switch (id) {
+		case CS_WARMUP: {
+			int time;
+			sscanf(value, "%d", &time);
+
+			if (time) {
+				sv.gameRound = 0;
+				sv.gameRoundTime = svs.time;
+			}
+		} break;
+
+		case 1005: {
+			sscanf(value, "%d", &sv.matchReady);
+		} break;
+	}
+
+	return 1;
+}
+
 /*
 ====================
 SV_GameSystemCalls
@@ -310,9 +442,12 @@ The module is making a system call
 */
 intptr_t SV_GameSystemCalls( intptr_t *args ) {
 	switch( args[0] ) {
-	case G_PRINT:
-		Com_Printf( "%s", (const char*)VMA(1) );
-		return 0;
+
+	case G_PRINT: {
+		char *out = SV_QVM_HookOutput((char*) VMA(1));
+		if (out) Com_Printf( "%s", out );
+	} return 0;
+
 	case G_ERROR:
 		Com_Error( ERR_DROP, "%s", (const char*)VMA(1) );
 		return 0;
@@ -402,20 +537,25 @@ intptr_t SV_GameSystemCalls( intptr_t *args ) {
 		return SV_inPVSIgnorePortals( VMA(1), VMA(2) );
 
 	case G_SET_CONFIGSTRING:
-		SV_SetConfigstring( args[1], VMA(2) );
+		if (SV_QVM_SetConfigstring( (int) args[1], (char *) VMA(2) )) {
+			SV_SetConfigstring( args[1], VMA(2) );
+		}
 		return 0;
 	case G_GET_CONFIGSTRING:
 		SV_GetConfigstring( args[1], VMA(2), args[3] );
 		return 0;
+
 	case G_SET_USERINFO:
 		SV_SetUserinfo( args[1], VMA(2) );
 		return 0;
 	case G_GET_USERINFO:
 		SV_GetUserinfo( args[1], VMA(2), args[3] );
 		return 0;
+
 	case G_GET_SERVERINFO:
 		SV_GetServerinfo( VMA(1), args[2] );
 		return 0;
+
 	case G_ADJUST_AREA_PORTAL_STATE:
 		SV_AdjustAreaPortalState( VMA(1), args[2] );
 		return 0;

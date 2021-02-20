@@ -20,6 +20,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <spawn.h>
+
 #include "server.h"
 
 /*
@@ -38,7 +45,7 @@ SV_GetPlayerByHandle
 Returns the player with player id or name from Cmd_Argv(1)
 ==================
 */
-static client_t *SV_GetPlayerByHandle(void) {
+static client_t *SV_GetPlayerByHandleId(int arg) {
 
 	char      *s;
 	char      name[MAX_NAME_LENGTH];
@@ -52,12 +59,12 @@ static client_t *SV_GetPlayerByHandle(void) {
 		return NULL;
 	}
 
-	if (Cmd_Argc() < 2) {
+	if (Cmd_Argc() < arg + 1) {
 		Com_Printf("No player specified.\n");
 		return NULL;
 	}
 
-	s = Cmd_Argv(1);
+	s = Cmd_Argv(arg);
 
 	// Check whether this is a numeric player handle.
 	for (i = 0; s[i] >= '0' && s[i] <= '9'; i++);
@@ -127,6 +134,10 @@ static client_t *SV_GetPlayerByHandle(void) {
 
 	}
 
+}
+
+static client_t *SV_GetPlayerByHandle(void) {
+	return SV_GetPlayerByHandleId(1);
 }
 
 /*
@@ -1662,74 +1673,74 @@ static void SV_NameServerDemo(char *filename, int length, const client_t *client
 
 void SV_StartRecordOne(client_t *client, char *filename) {
 
-    char path[MAX_OSPATH];
+	char path[MAX_OSPATH];
 
-    Com_DPrintf("SV_StartRecordOne\n");
+	Com_DPrintf("SV_StartRecordOne\n");
 
-    if (client->demo_recording) {
-        Com_Printf("startserverdemo: %s is already being recorded\n", client->name);
-        return;
-    }
+	if (client->demo_recording) {
+		Com_Printf("startserverdemo: %s is already being recorded\n", client->name);
+		return;
+	}
 
-    if (client->state != CS_ACTIVE) {
-        Com_Printf("startserverdemo: %s is not active\n", client->name);
-        return;
-    }
+	if (client->state != CS_ACTIVE) {
+		Com_Printf("startserverdemo: %s is not active\n", client->name);
+		return;
+	}
 
-    if (client->netchan.remoteAddress.type == NA_BOT) {
-        Com_Printf("startserverdemo: %s is a bot\n", client->name);
-        return;
-    }
+	if (client->netchan.remoteAddress.type == NA_BOT) {
+		Com_Printf("startserverdemo: %s is a bot\n", client->name);
+		return;
+	}
 
-    SV_NameServerDemo(path, sizeof(path), client, filename);
-    SVD_StartDemoFile(client, path);
+	SV_NameServerDemo(path, sizeof(path), client, filename);
+	SVD_StartDemoFile(client, path);
 
-    if(sv_demonotice->string) {
-        SV_SendServerCommand(client, "print \"%s\"\n", sv_demonotice->string);
-    }
+	if(sv_demonotice->string) {
+		SV_SendServerCommand(client, "print \"%s\"\n", sv_demonotice->string);
+	}
 
-    Com_Printf("startserverdemo: recording %s to %s\n", client->name, path);
+	Com_Printf("startserverdemo: recording %s to %s\n", client->name, path);
 }
 
 static void SV_StartRecordAll(void) {
 
-    int slot;
-    client_t *client;
+	int slot;
+	client_t *client;
 
-    Com_DPrintf("SV_StartRecordAll\n");
+	Com_DPrintf("SV_StartRecordAll\n");
 
-    for (slot = 0, client = svs.clients; slot < sv_maxclients->integer; slot++, client++) {
-        // filter here to avoid lots of bogus messages from SV_StartRecordOne()
-        if (client->netchan.remoteAddress.type == NA_BOT
-            || client->state != CS_ACTIVE
-            || client->demo_recording) {
-            continue;
-        }
-        SV_StartRecordOne(client, NULL);
-    }
+	for (slot = 0, client = svs.clients; slot < sv_maxclients->integer; slot++, client++) {
+		// filter here to avoid lots of bogus messages from SV_StartRecordOne()
+		if (client->netchan.remoteAddress.type == NA_BOT
+			|| client->state != CS_ACTIVE
+			|| client->demo_recording) {
+			continue;
+		}
+		SV_StartRecordOne(client, NULL);
+	}
 }
 
-static void SV_StopRecordOne(client_t *client) {
+void SV_StopRecordOne(client_t *client) {
 
-    Com_DPrintf("SV_StopRecordOne\n");
+	Com_DPrintf("SV_StopRecordOne\n");
 
-    if (!client->demo_recording) {
-        Com_Printf("stopserverdemo: %s is not being recorded\n", client->name);
-        return;
-    }
+	if (!client->demo_recording) {
+		Com_Printf("stopserverdemo: %s is not being recorded\n", client->name);
+		return;
+	}
 
-    if (client->state != CS_ACTIVE) { // disconnects are handled elsewhere
-        Com_Printf("stopserverdemo: %s is not active\n", client->name);
-        return;
-    }
+	if (client->state != CS_ACTIVE) { // disconnects are handled elsewhere
+		Com_Printf("stopserverdemo: %s is not active\n", client->name);
+		return;
+	}
 
-    if (client->netchan.remoteAddress.type == NA_BOT) {
-        Com_Printf("stopserverdemo: %s is a bot\n", client->name);
-        return;
-    }
+	if (client->netchan.remoteAddress.type == NA_BOT) {
+		Com_Printf("stopserverdemo: %s is a bot\n", client->name);
+		return;
+	}
 
-    SVD_StopDemoFile(client);
-    Com_Printf("stopserverdemo: stopped recording %s\n", client->name);
+	SVD_StopDemoFile(client);
+	Com_Printf("stopserverdemo: stopped recording %s\n", client->name);
 
 
 }
@@ -1773,38 +1784,38 @@ loading).
 */
 static void SV_StartServerDemo_f(void) {
 
-    client_t *client;
+	client_t *client;
 
-    Com_DPrintf("SV_StartServerDemo_f\n");
+	Com_DPrintf("SV_StartServerDemo_f\n");
 
-    if (!com_sv_running->integer) {
-        Com_Printf("startserverdemo: Server not running\n");
-        return;
-    }
+	if (!com_sv_running->integer) {
+		Com_Printf("startserverdemo: Server not running\n");
+		return;
+	}
 
-    if (Cmd_Argc() < 2) {
-        Com_Printf("Usage: startserverdemo <client-or-all> [<optional-demo-name>]\n");
-        return;
-    }
+	if (Cmd_Argc() < 2) {
+		Com_Printf("Usage: startserverdemo <client-or-all> [<optional-demo-name>]\n");
+		return;
+	}
 
-    if (!Q_stricmp(Cmd_Argv(1), "all")) {
+	if (!Q_stricmp(Cmd_Argv(1), "all")) {
 
-        SV_StartRecordAll();
+		SV_StartRecordAll();
 
-    } else {
+	} else {
 
-        client = SV_GetPlayerByHandle();
-        if (!client) {
-            return;
-        }
+		client = SV_GetPlayerByHandle();
+		if (!client) {
+			return;
+		}
 
-        if (Cmd_Argc() > 2) {
-            SV_StartRecordOne(client, Cmd_ArgsFrom(2));
-        } else {
-            SV_StartRecordOne(client, NULL);
-        }
+		if (Cmd_Argc() > 2) {
+			SV_StartRecordOne(client, Cmd_ArgsFrom(2));
+		} else {
+			SV_StartRecordOne(client, NULL);
+		}
 
-    }
+	}
 }
 
 /*
@@ -1847,6 +1858,204 @@ static void SV_StopServerDemo_f(void)
 		SV_StopRecordOne(client);
 	}
 
+}
+
+extern char **environ;
+
+int run_cmd(char *cmd)
+{
+	pid_t pid;
+	char *argv[] = {"sh", "-c", cmd, NULL};
+	int status = posix_spawn(&pid, "/bin/sh", NULL, NULL, argv, environ);
+	if (status) return -1;
+	if (waitpid(pid, &status, 0) == -1) return -2;
+	if (!WIFEXITED(status)) return -3;
+	int exit_status = WEXITSTATUS(status);
+	return exit_status;
+}
+
+const char indexScript[] = "createIndexFile() {(\n"
+"  DEMOS=\"$1\"\n DEMO=\"$2\"\n BUCKET=\"$3\"\n DIR=\"$4\"\n"
+"  cd \"$DEMOS\" || return 1\n"
+"  zip -r9 \"$DEMO.zip\" *.urtdemo || return 3\n"
+"  echo \"<!doctype html><html><head><title>$DEMO"
+	"</title></head><body>\" > index.html || return 2\n"
+"  echo \"<h1>UrT Pickup Demos</h1><h2>$DEMO</h2>\" >> index.html || return 2\n"
+"  echo \"<h3><a href=\\\"https://$BUCKET.storage.googleapis.com$DIR/$DEMO/$DEMO.zip\\\">"
+	"Download all as ZIP</a></h3>\" >> index.html || return 2\n"
+"  for FILE in `ls *.urtdemo`; do\n"
+"    echo \" <a href=\\\""
+	"https://$BUCKET.storage.googleapis.com$DIR/$DEMO/$FILE"
+"\\\">$FILE</a><br>\" >> index.html || return 2\n"
+"  done\n"
+"  echo \"</body></html>\" >> index.html || return 2\n"
+") 2> /dev/null > /dev/null\n }\ncreateIndexFile";
+
+/*
+==================
+SV_UploadServerDemo_f
+
+Upload server demo to cloud
+==================
+*/
+static void SV_UploadServerDemo_f(void) {
+    qtime_t time;
+	char shellcmd[8192];
+	char *demoId, demoIdBuf[MAX_QPATH];
+	char demoDir[MAX_OSPATH];
+	char *bucket, *dir;
+
+	cvar_t *fs_homepath = Cvar_Get("fs_homepath", "", 0);
+	cvar_t *fs_game = Cvar_Get("fs_game", "", 0);
+
+	Com_DPrintf("SV_UploadServerDemo_f\n");
+
+	if (!com_sv_running->integer) {
+		Com_Printf("uploadserverdemo: Server not running\n");
+		return;
+	}
+
+	if (Cmd_Argc() < 2) {
+		Com_Printf("Usage: uploadserverdemo <demo-id|\"now\"> "
+			"[<bucket>=\"urt-pickup\"] [<dir>=\"/demos\"]\n");
+		return;
+	}
+
+	if (!Q_stricmp(Cmd_Argv(1), "now")) {
+		Com_RealTime(&time);
+
+		Com_sprintf(
+			demoIdBuf, MAX_QPATH, "%.4d-%.2d-%.2d_%.2d-%.2d-%.2d",
+			time.tm_year+1900, time.tm_mon + 1, time.tm_mday,
+			time.tm_hour, time.tm_min, time.tm_sec
+		);
+
+		demoId = demoIdBuf;
+	} else {
+		demoId = Cmd_Argv(1);
+	}
+
+	if (Cmd_Argc() < 3) {
+		bucket = "urt-pickup";
+	} else {
+		bucket = Cmd_Argv(2);
+	}
+
+	if (Cmd_Argc() < 4) {
+		dir = "/demos";
+	} else {
+		dir = Cmd_Argv(3);
+	}
+
+	Com_sprintf(demoDir, MAX_OSPATH, "%s/%s/%s",
+		fs_homepath->string, fs_game->string, sv_demofolder->string);
+
+	int status;
+
+	Com_sprintf(shellcmd, MAX_OSPATH, "%s \"%s\" \"%s\" \"%s\" \"%s\"",
+		indexScript, demoDir, demoId, bucket, dir);
+
+	if ((status = run_cmd(shellcmd))) {
+		Com_Printf("UploadServerDemo: error: create index.html failed: %d\n",
+			status);
+		return;
+	}
+
+	Com_sprintf(shellcmd, MAX_OSPATH,
+		"gsutil cp -r \"%s\" \"gs://%s%s/%s\" 2> /dev/null > /dev/null",
+		demoDir, bucket, dir, demoId
+	);
+
+	if ((status = run_cmd(shellcmd))) {
+		Com_Printf("UploadServerDemo: error: upload to cloud failed: %d\n",
+			status);
+		return;
+	}
+
+	Com_Printf(
+		"UploadServerDemo: success: %s; "
+		"URL: https://%s.storage.googleapis.com%s/%s/index.html\n",
+		demoId, bucket, dir, demoId
+	);
+
+	Com_sprintf(shellcmd, MAX_OSPATH,
+		"rm -rf \"%s/\"* 2> /dev/null > /dev/null",
+		demoDir
+	);
+
+	if ((status = run_cmd(shellcmd))) {
+		Com_Printf("UploadServerDemo: error: cleanup failed: %d\n", status);
+		return;
+	}
+}
+
+/*
+==================
+SV_TeamScores_f
+
+Get/Set team scores
+==================
+*/
+static void SV_TeamScores_f(void) {
+	int r, b;
+
+	if (Cmd_Argc() < 3) {
+		r = sv.redScore;
+		b = sv.blueScore;
+		Com_Printf(" R:%d B:%d +R:%d +B:%d\n", r, b, sv.redDelta, sv.blueDelta);
+		return;
+	}
+
+	r = atoi(Cmd_Argv(1));
+	b = atoi(Cmd_Argv(2));
+
+	sv.redDelta += r - sv.redScore;
+	sv.blueDelta += b - sv.blueScore;
+	sv.redScore = r;
+	sv.blueScore = b;
+
+	SV_SendServerCommand(NULL, "scoresg %d %d", r, b);
+	Com_Printf("team scores set: R:%d B:%d +R:%d +B:%d\n", r, b, sv.redDelta, sv.blueDelta);
+}
+
+
+/*
+==================
+SV_PlayerScores_f
+
+Get/Set team scores
+==================
+*/
+static void SV_PlayerScores_f(void) {
+	client_t *cl;
+	playerState_t *ps;
+	int id, k, d;
+
+	if (Cmd_Argc() < 2) {
+		Com_Printf("usage: playerscores <player> [<K> <D>]\n");
+		return;
+	}
+
+	cl = SV_GetPlayerByHandle();
+	if (!cl) return;
+	id = cl - svs.clients;
+	ps = SV_GameClientNum(id);
+
+	if (Cmd_Argc() < 4) {
+		k = ps->persistant[PERS_SCORE];
+		d = ps->persistant[PERS_KILLED];
+		Com_Printf(" ID: %d K:%d D:%d\n", id, k, d);
+		return;
+	}
+
+	k = atoi(Cmd_Argv(2));
+	d = atoi(Cmd_Argv(3));
+
+	ps->persistant[PERS_SCORE] = k;
+	ps->persistant[PERS_KILLED] = d;
+
+	SV_SendScoreboardSingleMessageToAllClients(cl, ps);
+	Com_Printf("player scores set: ID: %d K:%d D:%d\n", id, k, d);
 }
 
 /*
@@ -1941,6 +2150,7 @@ void SV_AddOperatorCommands( void ) {
 		Cmd_SetCommandCompletionFunc( "sayto", SV_CompletePlayerName );
 		Cmd_AddCommand("startserverdemo", SV_StartServerDemo_f);
 		Cmd_AddCommand("stopserverdemo", SV_StopServerDemo_f);
+		Cmd_AddCommand("uploadserverdemo", SV_UploadServerDemo_f);
 	}
 	
 	Cmd_AddCommand("rehashbans", SV_RehashBans_f);
@@ -1950,6 +2160,8 @@ void SV_AddOperatorCommands( void ) {
 	Cmd_AddCommand("bandel", SV_BanDel_f);
 	Cmd_AddCommand("exceptdel", SV_ExceptDel_f);
 	Cmd_AddCommand("flushbans", SV_FlushBans_f);
+	Cmd_AddCommand("teamscores", SV_TeamScores_f);
+	Cmd_AddCommand("playerscores", SV_PlayerScores_f);
 }
 
 /*
@@ -1975,6 +2187,9 @@ void SV_RemoveOperatorCommands( void ) {
 	Cmd_RemoveCommand ("say");
 	Cmd_RemoveCommand ("startserverdemo");
 	Cmd_RemoveCommand ("stopserverdemo");
+	Cmd_RemoveCommand ("uploadserverdemo");
+	Cmd_RemoveCommand ("teamscores");
+	Cmd_RemoveCommand ("playerscores");
 #endif
 }
 

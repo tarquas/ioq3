@@ -31,6 +31,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define	PERS_SCORE				0		// !!! MUST NOT CHANGE, SERVER AND
 										// GAME BOTH REFERENCE !!!
 
+#define PERS_KILLED				8
+
+#define	STAT_STAMINA	0
+#define	STAT_HEALTH		6
+
+
 #define	MAX_ENT_CLUSTERS	16
 
 #ifdef USE_VOIP
@@ -111,6 +117,14 @@ typedef struct {
 
 	int				restartTime;
 	int				time;
+
+	int	redDelta;
+	int	blueDelta;
+	int	redScore;
+	int	blueScore;
+	int	gameRound;
+	int	gameRoundTime;
+	int matchReady; // 1*match + 2*red_ready + 4*blue_ready
 } server_t;
 
 
@@ -353,6 +367,13 @@ extern  cvar_t  *sv_demofolder;
 extern  cvar_t  *sv_autoRecordDemo;
 extern  cvar_t  *sv_sayprefix;
 extern  cvar_t  *sv_tellprefix;
+extern  cvar_t  *sv_forceGear;
+extern  cvar_t  *sv_iceEverywhere;
+extern  cvar_t  *sv_infiniteStamina;
+extern  cvar_t  *sv_infiniteAmmo;
+extern  cvar_t  *sv_substitute;
+extern  cvar_t  *sv_matchStart;
+extern  cvar_t  *sv_matchStartSec;
 
 #ifdef USE_AUTH
 extern	cvar_t	*sv_authServerIP;
@@ -462,6 +483,8 @@ void SV_SpawnServer( char *server, qboolean killBots );
 void SV_GetChallenge(netadr_t from);
 
 void SV_DirectConnect( netadr_t from );
+
+void SV_AdjustPlayerGear( client_t *cl );
 
 void SV_ExecuteClientMessage( client_t *cl, msg_t *msg );
 void SV_UserinfoChanged( client_t *cl );

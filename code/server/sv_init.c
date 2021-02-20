@@ -654,6 +654,13 @@ void SV_SpawnServer( char *server, qboolean killBots ) {
 	// make sure we are not paused
 	Cvar_Set("cl_paused", "0");
 
+	sv.redDelta = 0;
+	sv.blueDelta = 0;
+	sv.redScore = 0;
+	sv.blueScore = 0;
+	sv.gameRound = 0;
+	sv.gameRoundTime = 0;
+
 	// get a new checksum feed and restart the file system
 	sv.checksumFeed = ( ((unsigned int)rand() << 16) ^ (unsigned int)rand() ) ^ Com_Milliseconds();
 	FS_SetMapName(server);
@@ -925,6 +932,14 @@ void SV_Init (void)
 	sv_demonotice = Cvar_Get ("sv_demonotice", "Smile! You're on camera!", CVAR_ARCHIVE);
 	sv_demofolder = Cvar_Get ("sv_demofolder", "serverdemos", CVAR_ARCHIVE );
 	sv_autoRecordDemo = Cvar_Get ("sv_autoRecordDemo", "0", CVAR_ARCHIVE );
+
+	sv_forceGear = Cvar_Get ("sv_forceGear", "", CVAR_ARCHIVE);
+	sv_iceEverywhere = Cvar_Get ("sv_iceEverywhere", "0", CVAR_ARCHIVE);
+	sv_infiniteStamina = Cvar_Get ("sv_infiniteStamina", "0", CVAR_ARCHIVE);
+	sv_infiniteAmmo = Cvar_Get ("sv_demonotice", "0", CVAR_ARCHIVE);
+	sv_substitute = Cvar_Get ("sv_substitute", "1", CVAR_ARCHIVE);
+	sv_matchStart = Cvar_Get ("sv_matchStart", "0", CVAR_ARCHIVE);
+	sv_matchStartSec = Cvar_Get ("sv_matchStartSec", "30", CVAR_ARCHIVE);
 
 	sv_sayprefix = Cvar_Get ("sv_sayprefix", "console: ", CVAR_ARCHIVE );
 	sv_tellprefix = Cvar_Get ("sv_tellprefix", "console_tell: ", CVAR_ARCHIVE );
