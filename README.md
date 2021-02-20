@@ -161,6 +161,53 @@ exec server.cfg // Start server with the specified config file
 
 - Ctrl-V and Shift-Insert can be used to paste text on all platforms.
 
+## New Gameplay Features
+
+### sv_iceEverywhere (0 / 1)
+When set to nonzero, all ground surfaces become slick (icy).
+
+### sv_infiniteStamina (0 / 1)
+When set to nonzero, allows infinite stamina in frag (competitive) game types.
+
+### sv_substitute (0 / 1)
+When set to nonzero, prevents players from substituting in match mode.
+
+### sv_matchStart, sv_matchStartSec
+`sv_matchStart` defines weapons mode at match start:
+
+for **round based** game types (BM, FTL, FT, LMS, TS):
+- `0` -- all weapons;
+- `1` -- 1st round pistol, then all weapons;
+- `2` -- 1st round knife, then all weapons;
+- `3` -- 1st round knife, 2nd round pistol, then all weapons.
+
+for **classic** game types (CTF, CNH, FFA, TDM), weapons modes are defined by game periods with length defined by `sv_matchStartSec` (default `30`) seconds same way as for  round based mode.
+
+### teamscores, playerscores
+`teamscores` -- get current team scores and faked delta;
+`teamscores R B` -- set (fake) current team scores. `R` is red and `B` is blue team score value. this will send fake scores to clients, keeping original scores in QVM.
+
+Since faking doesn't change the score in QVM, features like `g_suddendeath`, `capturelimit`, etc. will not work correctly, so should not be used.
+
+`playerscores P` -- get player `P` scores;
+`playerscores P K D` -- set player `P` team scores: `K` is kills, `D` is deaths.
+
+
+## Server demo upload to Google Cloud
+
+### uploadserverdemo
+Upload demos to Google Cloud with `uploadserverdemo` command.
+
+### Setting up the Google Cloud Account for demos
+- Install `zip` (f.x. for Debian/Ubuntu: `apt-get install zip`);
+- Install [`gsutil`](https://cloud.google.com/storage/docs/gsutil_install);
+- On GCloud init step use console-only method: `gcloud init --console-only`;
+- Follow the instructions to link your Google Cloud account to `gsutil`;
+- Ensure correct installation and account setup: use `gsutil ls`
+  to list available buckets. Must show a list buckets in format `gs://<name>/`.
+- Test your server: Link `q3ut4` directory into this repo root.
+  Use `./test.sh` to build and launch your test server.
+
 ## Other changes
 
 - Download UI is improved a bit
@@ -226,61 +273,8 @@ exec server.cfg // Start server with the specified config file
 - [x] `sv_sayprefix` / `sv_tellprefix` cvars
 - [x] Send UrT specific server infostring
 - [x] Partial matching of map and players
-- [x] Upload demos to Google Cloud with `uploadserverdemo` command
 
 This list is likely incomplete. Please let me know if I forgot anything!
 
 
-# New Gameplay Features
 
-## teamscores, playerscores
-
-`teamscores` -- get current team scores and faked delta;
-`teamscores R B` -- set (fake) current team scores. `R` is red and `B` is blue team score value. this will send fake scores to clients, keeping original scores in QVM.
-
-Since faking doesn't change the score in QVM, features like `g_suddendeath`, `capturelimit` etc. will not work correctly, so should not be used.
-
-`playerscores P` -- get player `P` scores;
-`playerscores P K D` -- set player `P` team scores: `K` is kills, `D` is deaths.
-
-## sv_iceEverywhere (0 / 1)
-
-When set to nonzero, all ground surfaces become slick (icy).
-
-## sv_infiniteStamina (0 / 1)
-
-When set to nonzero, allows infinite stamina in frag (competitive) game types.
-
-## sv_substitute (0 / 1)
-
-Adds ability to deny using substituting command in matches.
-Default value is 1. Set to 0 to ignore `sub` client commands.
-
-## sv_matchStart, sv_matchStartSec
-
-`sv_matchStart` defines weapons mode at start of a game:
-
-for **survivor** game types (TS, BOMB etc):
-- `0` -- all weapons;
-- `1` -- 1st round pistol, then all weapons;
-- `2` -- 1st round knife, then all weapons;
-- `3` -- 1st round knife, 2nd round pistol, then all weapons.
-
-for **deathmatch** game types (CTF etc), weapons modes are defined by game periods with length defined by `sv_matchStartSec` (default `30`) seconds same way as for survivor rounds.
-
-
-# Set up Google Cloud Account for demos
-
-- Install `zip` (f.x. for Debian/Ubuntu: `apt-get install zip`);
-
-- Install [`gsutil`](https://cloud.google.com/storage/docs/gsutil_install);
-
-- On GCloud init step use console-only method: `gcloud init --console-only`;
-
-- Follow the instructions to link your Google Cloud account to `gsutil`;
-
-- Ensure correct installation and account setup: use `gsutil ls`
-  to list available buckets. Must show a list buckets in format `gs://<name>/`.
-
-- Test your server: Link `q3ut4` directory into this repo root.
-  Use `./test.sh` to build and launch your test server.
