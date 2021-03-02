@@ -244,22 +244,6 @@ ASMDIR=$(MOUNT_DIR)/asm
 SYSDIR=$(MOUNT_DIR)/sys
 BLIBDIR=$(MOUNT_DIR)/botlib
 NDIR=$(MOUNT_DIR)/null
-<<<<<<< HEAD
-UIDIR=$(MOUNT_DIR)/ui
-Q3UIDIR=$(MOUNT_DIR)/q3_ui
-JPDIR=$(MOUNT_DIR)/jpeg-8c
-OGGDIR=$(MOUNT_DIR)/libogg-1.3.3
-VORBISDIR=$(MOUNT_DIR)/libvorbis-1.3.6
-OPUSDIR=$(MOUNT_DIR)/opus-1.2.1
-OPUSFILEDIR=$(MOUNT_DIR)/opusfile-0.9
-ZDIR=$(MOUNT_DIR)/zlib
-TOOLSDIR=$(MOUNT_DIR)/tools
-Q3ASMDIR=$(MOUNT_DIR)/tools/asm
-LBURGDIR=$(MOUNT_DIR)/tools/lcc/lburg
-Q3CPPDIR=$(MOUNT_DIR)/tools/lcc/cpp
-Q3LCCETCDIR=$(MOUNT_DIR)/tools/lcc/etc
-Q3LCCSRCDIR=$(MOUNT_DIR)/tools/lcc/src
-=======
 JPDIR=$(EXTERNAL_DIR)/jpeg-8c
 OGGDIR=$(EXTERNAL_DIR)/libogg-1.3.3
 VORBISDIR=$(EXTERNAL_DIR)/libvorbis-1.3.6
@@ -268,7 +252,6 @@ OPUSFILEDIR=$(EXTERNAL_DIR)/opusfile-0.9
 ZDIR=$(EXTERNAL_DIR)/zlib
 SDLHDIR=$(EXTERNAL_DIR)/SDL2
 LIBSDIR=$(LIBS_DIR)
->>>>>>> 58d8e9942101e0ca28a434b92e1d45d42eb2bd9a
 AUTOUPDATERSRCDIR=$(MOUNT_DIR)/autoupdater
 LIBTOMCRYPTSRCDIR=$(AUTOUPDATERSRCDIR)/rsa_tools/libtomcrypt-1.17
 TOMSFASTMATHSRCDIR=$(AUTOUPDATERSRCDIR)/rsa_tools/tomsfastmath-0.13.1
@@ -624,7 +607,6 @@ ifdef MINGW
 
   BINEXT=.exe
 
-<<<<<<< HEAD
   ifeq ($(CROSS_COMPILING),0)
     TOOLS_BINEXT=.exe
   endif
@@ -646,8 +628,6 @@ ifdef MINGW
       $(call bin_path, $(TOOLS_MINGW_PREFIX)-gcc))))
   endif
 
-=======
->>>>>>> 58d8e9942101e0ca28a434b92e1d45d42eb2bd9a
   LIBS= -lws2_32 -lwinmm -lpsapi
   AUTOUPDATER_LIBS += -lwininet
 
@@ -1373,221 +1353,6 @@ makedirs:
 	@$(MKDIR) $(B)/renderergl2
 	@$(MKDIR) $(B)/renderergl2/glsl
 	@$(MKDIR) $(B)/ded
-<<<<<<< HEAD
-	@$(MKDIR) $(B)/$(BASEGAME)/cgame
-	@$(MKDIR) $(B)/$(BASEGAME)/game
-	@$(MKDIR) $(B)/$(BASEGAME)/ui
-	@$(MKDIR) $(B)/$(BASEGAME)/qcommon
-	@$(MKDIR) $(B)/$(BASEGAME)/vm
-	@$(MKDIR) $(B)/$(MISSIONPACK)/cgame
-	@$(MKDIR) $(B)/$(MISSIONPACK)/game
-	@$(MKDIR) $(B)/$(MISSIONPACK)/ui
-	@$(MKDIR) $(B)/$(MISSIONPACK)/qcommon
-	@$(MKDIR) $(B)/$(MISSIONPACK)/vm
-	@$(MKDIR) $(B)/tools/asm
-	@$(MKDIR) $(B)/tools/etc
-	@$(MKDIR) $(B)/tools/rcc
-	@$(MKDIR) $(B)/tools/cpp
-	@$(MKDIR) $(B)/tools/lburg
-
-#############################################################################
-# QVM BUILD TOOLS
-#############################################################################
-
-ifndef TOOLS_CC
-  # A compiler which probably produces native binaries
-  TOOLS_CC = gcc
-endif
-
-ifndef YACC
-  YACC = yacc
-endif
-
-TOOLS_OPTIMIZE = -g -Wall -fno-strict-aliasing
-TOOLS_CFLAGS += $(TOOLS_OPTIMIZE) \
-                -DTEMPDIR=\"$(TEMPDIR)\" -DSYSTEM=\"\" \
-                -I$(Q3LCCSRCDIR) \
-                -I$(LBURGDIR)
-TOOLS_LIBS =
-TOOLS_LDFLAGS =
-
-ifeq ($(GENERATE_DEPENDENCIES),1)
-  TOOLS_CFLAGS += -MMD
-endif
-
-define DO_YACC
-$(echo_cmd) "YACC $<"
-$(Q)$(YACC) $<
-$(Q)mv -f y.tab.c $@
-endef
-
-define DO_TOOLS_CC
-$(echo_cmd) "TOOLS_CC $<"
-$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) -o $@ -c $<
-endef
-
-define DO_TOOLS_CC_DAGCHECK
-$(echo_cmd) "TOOLS_CC_DAGCHECK $<"
-$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) -Wno-unused -o $@ -c $<
-endef
-
-LBURG       = $(B)/tools/lburg/lburg$(TOOLS_BINEXT)
-DAGCHECK_C  = $(B)/tools/rcc/dagcheck.c
-Q3RCC       = $(B)/tools/q3rcc$(TOOLS_BINEXT)
-Q3CPP       = $(B)/tools/q3cpp$(TOOLS_BINEXT)
-Q3LCC       = $(B)/tools/q3lcc$(TOOLS_BINEXT)
-Q3ASM       = $(B)/tools/q3asm$(TOOLS_BINEXT)
-STRINGIFY   = $(B)/tools/stringify$(TOOLS_BINEXT)
-
-LBURGOBJ= \
-  $(B)/tools/lburg/lburg.o \
-  $(B)/tools/lburg/gram.o
-
-# override GNU Make built-in rule for converting gram.y to gram.c
-%.c: %.y
-ifeq ($(USE_YACC),1)
-	$(DO_YACC)
-endif
-
-$(B)/tools/lburg/%.o: $(LBURGDIR)/%.c
-	$(DO_TOOLS_CC)
-
-$(LBURG): $(LBURGOBJ)
-	$(echo_cmd) "LD $@"
-	$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) $(TOOLS_LDFLAGS) -o $@ $^ $(TOOLS_LIBS)
-
-Q3RCCOBJ = \
-  $(B)/tools/rcc/alloc.o \
-  $(B)/tools/rcc/bind.o \
-  $(B)/tools/rcc/bytecode.o \
-  $(B)/tools/rcc/dag.o \
-  $(B)/tools/rcc/dagcheck.o \
-  $(B)/tools/rcc/decl.o \
-  $(B)/tools/rcc/enode.o \
-  $(B)/tools/rcc/error.o \
-  $(B)/tools/rcc/event.o \
-  $(B)/tools/rcc/expr.o \
-  $(B)/tools/rcc/gen.o \
-  $(B)/tools/rcc/init.o \
-  $(B)/tools/rcc/inits.o \
-  $(B)/tools/rcc/input.o \
-  $(B)/tools/rcc/lex.o \
-  $(B)/tools/rcc/list.o \
-  $(B)/tools/rcc/main.o \
-  $(B)/tools/rcc/null.o \
-  $(B)/tools/rcc/output.o \
-  $(B)/tools/rcc/prof.o \
-  $(B)/tools/rcc/profio.o \
-  $(B)/tools/rcc/simp.o \
-  $(B)/tools/rcc/stmt.o \
-  $(B)/tools/rcc/string.o \
-  $(B)/tools/rcc/sym.o \
-  $(B)/tools/rcc/symbolic.o \
-  $(B)/tools/rcc/trace.o \
-  $(B)/tools/rcc/tree.o \
-  $(B)/tools/rcc/types.o
-
-$(DAGCHECK_C): $(LBURG) $(Q3LCCSRCDIR)/dagcheck.md
-	$(echo_cmd) "LBURG $(Q3LCCSRCDIR)/dagcheck.md"
-	$(Q)$(LBURG) $(Q3LCCSRCDIR)/dagcheck.md $@
-
-$(B)/tools/rcc/dagcheck.o: $(DAGCHECK_C)
-	$(DO_TOOLS_CC_DAGCHECK)
-
-$(B)/tools/rcc/%.o: $(Q3LCCSRCDIR)/%.c
-	$(DO_TOOLS_CC)
-
-$(Q3RCC): $(Q3RCCOBJ)
-	$(echo_cmd) "LD $@"
-	$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) $(TOOLS_LDFLAGS) -o $@ $^ $(TOOLS_LIBS)
-
-Q3CPPOBJ = \
-  $(B)/tools/cpp/cpp.o \
-  $(B)/tools/cpp/lex.o \
-  $(B)/tools/cpp/nlist.o \
-  $(B)/tools/cpp/tokens.o \
-  $(B)/tools/cpp/macro.o \
-  $(B)/tools/cpp/eval.o \
-  $(B)/tools/cpp/include.o \
-  $(B)/tools/cpp/hideset.o \
-  $(B)/tools/cpp/getopt.o \
-  $(B)/tools/cpp/unix.o
-
-$(B)/tools/cpp/%.o: $(Q3CPPDIR)/%.c
-	$(DO_TOOLS_CC)
-
-$(Q3CPP): $(Q3CPPOBJ)
-	$(echo_cmd) "LD $@"
-	$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) $(TOOLS_LDFLAGS) -o $@ $^ $(TOOLS_LIBS)
-
-Q3LCCOBJ = \
-	$(B)/tools/etc/lcc.o \
-	$(B)/tools/etc/bytecode.o
-
-$(B)/tools/etc/%.o: $(Q3LCCETCDIR)/%.c
-	$(DO_TOOLS_CC)
-
-$(Q3LCC): $(Q3LCCOBJ) $(Q3RCC) $(Q3CPP)
-	$(echo_cmd) "LD $@"
-	$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) $(TOOLS_LDFLAGS) -o $@ $(Q3LCCOBJ) $(TOOLS_LIBS)
-
-$(STRINGIFY): $(TOOLSDIR)/stringify.c
-	$(echo_cmd) "TOOLS_CC $@"
-	$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) $(TOOLS_LDFLAGS) -o $@ $(TOOLSDIR)/stringify.c $(TOOLS_LIBS)
-
-define DO_Q3LCC
-$(echo_cmd) "Q3LCC $<"
-$(Q)$(Q3LCC) $(BASEGAME_CFLAGS) -o $@ $<
-endef
-
-define DO_CGAME_Q3LCC
-$(echo_cmd) "CGAME_Q3LCC $<"
-$(Q)$(Q3LCC) $(BASEGAME_CFLAGS) -DCGAME -o $@ $<
-endef
-
-define DO_GAME_Q3LCC
-$(echo_cmd) "GAME_Q3LCC $<"
-$(Q)$(Q3LCC) $(BASEGAME_CFLAGS) -DQAGAME -o $@ $<
-endef
-
-define DO_UI_Q3LCC
-$(echo_cmd) "UI_Q3LCC $<"
-$(Q)$(Q3LCC) $(BASEGAME_CFLAGS) -DUI -o $@ $<
-endef
-
-define DO_Q3LCC_MISSIONPACK
-$(echo_cmd) "Q3LCC_MISSIONPACK $<"
-$(Q)$(Q3LCC) $(MISSIONPACK_CFLAGS) -o $@ $<
-endef
-
-define DO_CGAME_Q3LCC_MISSIONPACK
-$(echo_cmd) "CGAME_Q3LCC_MISSIONPACK $<"
-$(Q)$(Q3LCC) $(MISSIONPACK_CFLAGS) -DCGAME -o $@ $<
-endef
-
-define DO_GAME_Q3LCC_MISSIONPACK
-$(echo_cmd) "GAME_Q3LCC_MISSIONPACK $<"
-$(Q)$(Q3LCC) $(MISSIONPACK_CFLAGS) -DQAGAME -o $@ $<
-endef
-
-define DO_UI_Q3LCC_MISSIONPACK
-$(echo_cmd) "UI_Q3LCC_MISSIONPACK $<"
-$(Q)$(Q3LCC) $(MISSIONPACK_CFLAGS) -DUI -o $@ $<
-endef
-
-
-Q3ASMOBJ = \
-  $(B)/tools/asm/q3asm.o \
-  $(B)/tools/asm/cmdlib.o
-
-$(B)/tools/asm/%.o: $(Q3ASMDIR)/%.c
-	$(DO_TOOLS_CC)
-
-$(Q3ASM): $(Q3ASMOBJ)
-	$(echo_cmd) "LD $@"
-	$(Q)$(TOOLS_CC) $(TOOLS_CFLAGS) $(TOOLS_LDFLAGS) -o $@ $^ $(TOOLS_LIBS)
-=======
->>>>>>> 58d8e9942101e0ca28a434b92e1d45d42eb2bd9a
 
 
 #############################################################################
@@ -2492,25 +2257,7 @@ clean2:
 	@rm -f $(STRINGOBJ)
 	@rm -f $(TARGETS)
 
-<<<<<<< HEAD
-toolsclean: toolsclean-debug toolsclean-release
-
-toolsclean-debug:
-	@$(MAKE) toolsclean2 B=$(BD)
-
-toolsclean-release:
-	@$(MAKE) toolsclean2 B=$(BR)
-
-toolsclean2:
-	@echo "TOOLS_CLEAN $(B)"
-	@rm -f $(TOOLSOBJ)
-	@rm -f $(TOOLSOBJ_D_FILES)
-	@rm -f $(LBURG) $(DAGCHECK_C) $(Q3RCC) $(Q3CPP) $(Q3LCC) $(Q3ASM) $(STRINGIFY)
-
-distclean: clean toolsclean
-=======
 distclean: clean
->>>>>>> 58d8e9942101e0ca28a434b92e1d45d42eb2bd9a
 	@rm -rf $(BUILD_DIR)
 
 dist:
